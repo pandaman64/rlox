@@ -1,3 +1,5 @@
+use std::mem::discriminant;
+
 use crate::{trace_available, value::Value, Chunk, OpCode};
 use num::FromPrimitive as _;
 
@@ -103,6 +105,18 @@ impl<'c> Vm<'c> {
                 Some(False) => {
                     self.stack.push(Value::Bool(false));
                 }
+                Some(Equal) => {
+                    let v2 = try_pop!(self);
+                    let v1 = try_pop!(self);
+
+                    if discriminant(&v1) != discriminant(&v2) {
+                        eprintln!("type mismatch between {} and {}", v1, v2);
+                        return InterpetResult::RuntimeError;
+                    }
+                    self.stack.push(Value::Bool(v1 == v2));
+                }
+                Some(Less) => binop!(self, Number, <, Bool),
+                Some(Greater) => binop!(self, Number, >, Bool),
                 Some(Negate) => {
                     check_top!(self, Number);
                     let value = try_pop!(self, Number);

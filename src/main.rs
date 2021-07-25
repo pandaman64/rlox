@@ -34,7 +34,7 @@ pub fn trace_available() -> bool {
 }
 
 #[repr(u8)]
-#[derive(FromPrimitive, ToPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromPrimitive, ToPrimitive)]
 pub enum OpCode {
     Nil,
     True,
@@ -42,6 +42,9 @@ pub enum OpCode {
     Constant,
     Negate,
     Not,
+    Equal,
+    Greater,
+    Less,
     Add,
     Subtract,
     Multiply,
@@ -90,6 +93,9 @@ impl Chunk {
             Some(Constant) => trace_constant_code(self, offset, "OP_CONSTANT"),
             Some(Negate) => trace_simple_code(offset, "OP_NEGATE"),
             Some(Not) => trace_simple_code(offset, "OP_NOT"),
+            Some(Equal) => trace_simple_code(offset, "OP_EQUAL"),
+            Some(Less) => trace_simple_code(offset, "OP_LESS"),
+            Some(Greater) => trace_simple_code(offset, "OP_GREATER"),
             Some(Add) => trace_simple_code(offset, "OP_ADD"),
             Some(Subtract) => trace_simple_code(offset, "OP_SUB"),
             Some(Multiply) => trace_simple_code(offset, "OP_MUL"),

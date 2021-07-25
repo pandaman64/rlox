@@ -20,23 +20,25 @@ pub fn gen_expr(chunk: &mut Chunk, expr: Expr) {
                 let operand = Expr::cast(operand).unwrap();
                 gen_expr(chunk, operand);
             }
-            let opcode = match expr.kind() {
+            let opcodes: &[OpCode] = match expr.kind() {
                 BinOpKind::Assignment => todo!(),
                 BinOpKind::Or => todo!(),
                 BinOpKind::And => todo!(),
-                BinOpKind::Equal => todo!(),
-                BinOpKind::NotEqual => todo!(),
-                BinOpKind::Less => todo!(),
-                BinOpKind::Greater => todo!(),
-                BinOpKind::LessEqual => todo!(),
-                BinOpKind::GreaterEqual => todo!(),
-                BinOpKind::Add => OpCode::Add,
-                BinOpKind::Subtract => OpCode::Subtract,
-                BinOpKind::Multiply => OpCode::Multiply,
-                BinOpKind::Divide => OpCode::Divide,
+                BinOpKind::Equal => &[OpCode::Equal],
+                BinOpKind::NotEqual => &[OpCode::Equal, OpCode::Not],
+                BinOpKind::Less => &[OpCode::Less],
+                BinOpKind::Greater => &[OpCode::Greater],
+                BinOpKind::LessEqual => &[OpCode::Greater, OpCode::Not],
+                BinOpKind::GreaterEqual => &[OpCode::Less, OpCode::Not],
+                BinOpKind::Add => &[OpCode::Add],
+                BinOpKind::Subtract => &[OpCode::Subtract],
+                BinOpKind::Multiply => &[OpCode::Multiply],
+                BinOpKind::Divide => &[OpCode::Divide],
                 BinOpKind::Dot => todo!(),
             };
-            chunk.push_code(opcode as _, 0);
+            for opcode in opcodes.iter() {
+                chunk.push_code(*opcode as _, 0);
+            }
         }
         Expr::Primary(expr) => match expr {
             Primary::Identifier(_ident) => todo!(),
