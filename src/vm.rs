@@ -2,11 +2,43 @@ use crate::{trace_available, value::Value, Chunk, OpCode};
 use num::FromPrimitive as _;
 
 macro_rules! try_pop {
+    ($self:ident, $variant:ident) => {{
+        match $self.stack.pop() {
+            Some(Value::$variant(v)) => v,
+            _ => return InterpetResult::RuntimeError,
+        }
+    }};
     ($self:ident) => {{
         match $self.stack.pop() {
             Some(v) => v,
-            None => return InterpetResult::RuntimeError,
+            _ => return InterpetResult::RuntimeError,
         }
+    }};
+}
+
+macro_rules! check_top {
+    ($self:ident, $variant:ident) => {{
+        match $self.stack.last() {
+            Some(Value::$variant(_)) => {}
+            None => {
+                eprintln!("Expected {}, got empty stack", stringify!($variant));
+                return InterpetResult::RuntimeError;
+            }
+            Some(v) => {
+                eprintln!("Expected {}, got {}", stringify!($variant), v);
+                return InterpetResult::RuntimeError;
+            }
+        }
+    }};
+}
+
+macro_rules! binop {
+    ($self:ident, $from_ty:ident, $op:tt, $to_ty:ident) => {{
+        check_top!($self, $from_ty);
+        let v2 = try_pop!($self, $from_ty);
+        check_top!($self, $from_ty);
+        let v1 = try_pop!($self, $from_ty);
+        $self.stack.push($to_ty(v1 $op v2));
     }};
 }
 
@@ -33,6 +65,7 @@ impl<'c> Vm<'c> {
 
     pub fn run(&mut self) -> InterpetResult {
         use OpCode::*;
+        use Value::*;
 
         loop {
             if trace_available() {
@@ -58,38 +91,23 @@ impl<'c> Vm<'c> {
                 Some(Constant) => {
                     let index = usize::from(self.chunk.code[self.ip]);
                     self.ip += 1;
-                    let constant = self.chunk.constants[index];
+                    let constant = self.chunk.constants[index].clone();
                     self.stack.push(constant);
                 }
                 Some(Negate) => {
-                    let value = try_pop!(self);
-                    self.stack.push(-value);
+                    check_top!(self, Number);
+                    let value = try_pop!(self, Number);
+                    self.stack.push(Number(-value));
                 }
                 Some(Not) => {
-                    let value = try_pop!(self).to_bits();
-                    let not = u64::from(value != 0);
-                    self.stack.push(f64::from_bits(not))
+                    check_top!(self, Number);
+                    let value = try_pop!(self, Bool);
+                    self.stack.push(Bool(!value))
                 }
-                Some(Add) => {
-                    let v2 = try_pop!(self);
-                    let v1 = try_pop!(self);
-                    self.stack.push(v1 + v2);
-                }
-                Some(Subtract) => {
-                    let v2 = try_pop!(self);
-                    let v1 = try_pop!(self);
-                    self.stack.push(v1 - v2);
-                }
-                Some(Multiply) => {
-                    let v2 = try_pop!(self);
-                    let v1 = try_pop!(self);
-                    self.stack.push(v1 * v2);
-                }
-                Some(Divide) => {
-                    let v2 = try_pop!(self);
-                    let v1 = try_pop!(self);
-                    self.stack.push(v1 / v2);
-                }
+                Some(Add) => binop!(self, Number, +, Number),
+                Some(Subtract) => binop!(self, Number, -, Number),
+                Some(Multiply) => binop!(self, Number, *, Number),
+                Some(Divide) => binop!(self, Number, /, Number),
             }
         }
     }

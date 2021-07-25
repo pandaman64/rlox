@@ -1,5 +1,6 @@
 use crate::{
     ast::{BinOpKind, Expr, Primary, UnaryOpKind},
+    value::Value,
     Chunk, OpCode,
 };
 
@@ -41,7 +42,7 @@ pub fn gen_expr(chunk: &mut Chunk, expr: Expr) {
             Primary::Identifier(_ident) => todo!(),
             Primary::StringLiteral(_s) => todo!(),
             Primary::NumberLiteral(num) => {
-                let index = chunk.push_constant(num.to_number());
+                let index = chunk.push_constant(Value::Number(num.to_number()));
                 chunk.push_code(OpCode::Constant as _, 0);
                 chunk.push_code(index, 0);
             }
