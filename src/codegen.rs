@@ -40,6 +40,16 @@ pub fn gen_expr(chunk: &mut Chunk, expr: Expr) {
         }
         Expr::Primary(expr) => match expr {
             Primary::Identifier(_ident) => todo!(),
+            Primary::NilLiteral(_) => {
+                chunk.push_code(OpCode::Nil as _, 0);
+            }
+            Primary::BooleanLiteral(b) => {
+                if b.to_boolean() {
+                    chunk.push_code(OpCode::True as _, 0);
+                } else {
+                    chunk.push_code(OpCode::False as _, 0);
+                }
+            }
             Primary::StringLiteral(_s) => todo!(),
             Primary::NumberLiteral(num) => {
                 let index = chunk.push_constant(Value::Number(num.to_number()));

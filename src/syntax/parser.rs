@@ -109,7 +109,10 @@ where
                 }
                 self.builder.finish_node();
             }
-            Some(IdentifierToken | StringLiteralToken | NumberToken) => {
+            Some(
+                IdentifierToken | StringLiteralToken | NumberToken | NilToken | TrueToken
+                | FalseToken,
+            ) => {
                 self.builder.start_node(PrimaryExprNode.into());
                 self.bump();
                 self.builder.finish_node();

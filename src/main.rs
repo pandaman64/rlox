@@ -36,6 +36,9 @@ pub fn trace_available() -> bool {
 #[repr(u8)]
 #[derive(FromPrimitive, ToPrimitive)]
 pub enum OpCode {
+    Nil,
+    True,
+    False,
     Constant,
     Negate,
     Not,
@@ -81,6 +84,9 @@ impl Chunk {
         }
         match OpCode::from_u8(code) {
             None => trace_simple_code(offset, "OP_UNKNOWN"),
+            Some(Nil) => trace_simple_code(offset, "OP_NIL"),
+            Some(True) => trace_simple_code(offset, "OP_TRUE"),
+            Some(False) => trace_simple_code(offset, "OP_FALSE"),
             Some(Constant) => trace_constant_code(self, offset, "OP_CONSTANT"),
             Some(Negate) => trace_simple_code(offset, "OP_NEGATE"),
             Some(Not) => trace_simple_code(offset, "OP_NOT"),

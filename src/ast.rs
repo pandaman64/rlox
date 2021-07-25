@@ -162,8 +162,48 @@ impl NumberLiteral {
 }
 
 #[derive(Debug)]
+pub struct NilLiteral {
+    inner: SyntaxToken,
+}
+
+impl NilLiteral {
+    pub fn cast(inner: SyntaxToken) -> Option<Self> {
+        if inner.kind() == SyntaxKind::NilToken {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct BooleanLiteral {
+    inner: SyntaxToken,
+}
+
+impl BooleanLiteral {
+    pub fn cast(inner: SyntaxToken) -> Option<Self> {
+        if matches!(inner.kind(), SyntaxKind::TrueToken | SyntaxKind::FalseToken) {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn to_boolean(&self) -> bool {
+        match self.inner.kind() {
+            SyntaxKind::TrueToken => true,
+            SyntaxKind::FalseToken => false,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum Primary {
     Identifier(Identifier),
+    NilLiteral(NilLiteral),
+    BooleanLiteral(BooleanLiteral),
     StringLiteral(StringLiteral),
     NumberLiteral(NumberLiteral),
 }
@@ -176,6 +216,8 @@ impl Primary {
             let child = first_nontirivial_token(&inner)?;
             Some(match child.kind() {
                 IdentifierToken => Self::Identifier(Identifier::cast(child)?),
+                NilToken => Self::NilLiteral(NilLiteral::cast(child)?),
+                TrueToken | FalseToken => Self::BooleanLiteral(BooleanLiteral::cast(child)?),
                 StringLiteralToken => Self::StringLiteral(StringLiteral::cast(child)?),
                 NumberToken => Self::NumberLiteral(NumberLiteral::cast(child)?),
                 _ => return None,

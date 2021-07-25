@@ -94,13 +94,22 @@ impl<'c> Vm<'c> {
                     let constant = self.chunk.constants[index].clone();
                     self.stack.push(constant);
                 }
+                Some(OpCode::Nil) => {
+                    self.stack.push(Value::Nil);
+                }
+                Some(True) => {
+                    self.stack.push(Value::Bool(true));
+                }
+                Some(False) => {
+                    self.stack.push(Value::Bool(false));
+                }
                 Some(Negate) => {
                     check_top!(self, Number);
                     let value = try_pop!(self, Number);
                     self.stack.push(Number(-value));
                 }
                 Some(Not) => {
-                    check_top!(self, Number);
+                    check_top!(self, Bool);
                     let value = try_pop!(self, Bool);
                     self.stack.push(Bool(!value))
                 }
