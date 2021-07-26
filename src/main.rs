@@ -42,6 +42,7 @@ pub enum OpCode {
     True,
     False,
     Constant,
+    Pop,
     Negate,
     Not,
     Equal,
@@ -101,6 +102,7 @@ impl Chunk {
                 // SAFETY: constants in this chunk are valid
                 unsafe { trace_constant_code(self, offset, "OP_CONSTANT") }
             }
+            Some(Pop) => trace_simple_code(offset, "OP_POP"),
             Some(Negate) => trace_simple_code(offset, "OP_NEGATE"),
             Some(Not) => trace_simple_code(offset, "OP_NOT"),
             Some(Equal) => trace_simple_code(offset, "OP_EQUAL"),

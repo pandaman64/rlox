@@ -183,6 +183,15 @@ impl Vm {
                     let constant = chunk.constants[index].clone();
                     self.stack.push(constant);
                 }
+                Some(Pop) => {
+                    match self.stack.pop() {
+                        None => {
+                            eprintln!("no stack");
+                            return InterpetResult::RuntimeError;
+                        }
+                        Some(_) => {}
+                    }
+                }
                 Some(OpCode::Nil) => {
                     self.stack.push(Value::Nil);
                 }

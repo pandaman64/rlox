@@ -72,7 +72,7 @@ pub fn gen_stmt(vm: &mut Vm, chunk: &mut Chunk, stmt: Stmt) {
     match stmt {
         Stmt::ExprStmt(stmt) => {
             gen_expr(vm, chunk, stmt.expr().unwrap());
-            // TODO: pop value
+            chunk.push_code(OpCode::Pop as _, 0);
         }
         Stmt::PrintStmt(stmt) => {
             gen_expr(vm, chunk, stmt.expr().unwrap());
