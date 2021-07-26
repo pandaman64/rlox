@@ -81,9 +81,17 @@ where
             kind.is_trivial()
         }
 
-        while self.input.next_if(is_trivial).is_some() {}
+        while self.input.peek().map_or_else(|| false, is_trivial) {
+            self.bump();
+        }
 
         self.input.peek().map(|(kind, _, _)| *kind)
+    }
+
+    fn expect(&mut self, expected: SyntaxKind) {
+        if matches!(self.peek(), Some(token) if token == expected) {
+            self.bump();
+        }
     }
 
     // Crafting interpreter uses a jump table for matches in this function
@@ -91,38 +99,40 @@ where
         use BindingPower::*;
         use SyntaxKind::*;
 
-        let checkpoint = self.builder.checkpoint();
-        match self.peek() {
+        let checkpoint = match self.peek() {
             None => return,
-            Some(MinusToken | BangToken) => {
-                self.builder.start_node(UnaryOpNode.into());
-                self.bump();
-                self.parse_expr(PrefixRight);
-                self.builder.finish_node();
-            }
-            Some(ParenOpenToken) => {
+            Some(token) => {
                 self.builder.start_node(ExprNode.into());
-                self.bump();
-                self.parse_expr(Zero);
-                if matches!(self.peek(), Some(ParenCloseToken)) {
-                    self.bump();
+                let checkpoint = self.builder.checkpoint();
+                match token {
+                    MinusToken | BangToken => {
+                        self.builder.start_node(UnaryOpNode.into());
+                        self.bump();
+                        self.parse_expr(PrefixRight);
+                        self.builder.finish_node();
+                    }
+                    ParenOpenToken => {
+                        self.builder.start_node(ExprNode.into());
+                        self.bump();
+                        self.parse_expr(Zero);
+                        self.expect(ParenCloseToken);
+                        self.builder.finish_node();
+                    }
+                    IdentifierToken | StringLiteralToken | NumberToken | NilToken | TrueToken
+                    | FalseToken => {
+                        self.builder.start_node(PrimaryExprNode.into());
+                        self.bump();
+                        self.builder.finish_node();
+                    }
+                    _ => todo!("syntax error"),
                 }
-                self.builder.finish_node();
+                checkpoint
             }
-            Some(
-                IdentifierToken | StringLiteralToken | NumberToken | NilToken | TrueToken
-                | FalseToken,
-            ) => {
-                self.builder.start_node(PrimaryExprNode.into());
-                self.bump();
-                self.builder.finish_node();
-            }
-            _ => todo!("syntax error"),
-        }
+        };
 
         loop {
             match self.peek() {
-                None => return,
+                None => break,
                 Some(
                     kind
                     @
@@ -144,11 +154,67 @@ where
                 _ => break,
             }
         }
+
+        self.builder.finish_node();
     }
 
+    fn parse_stmt(&mut self) {
+        use SyntaxKind::*;
+
+        match self.peek() {
+            None => {},
+            Some(token) => {
+                self.builder.start_node(SyntaxKind::StmtNode.into());
+                match token {
+                    PrintToken => {
+                        self.builder.start_node(PrintStmtNode.into());
+                        self.bump();
+                        self.parse_expr(BindingPower::Zero);
+                        self.expect(SemicolonToken);
+                        self.builder.finish_node();
+                    }
+                    // expression statements
+                    _ => {
+                        self.builder.start_node(ExprStmtNode.into());
+                        self.parse_expr(BindingPower::Zero);
+                        self.expect(SemicolonToken);
+                        self.builder.finish_node();
+                    }
+                }
+                self.builder.finish_node();
+            }
+        }
+    }
+
+    fn parse_decl(&mut self) {
+        use SyntaxKind::*;
+
+        match self.peek() {
+            None => {},
+            Some(token) => {
+                self.builder.start_node(DeclNode.into());
+                match token {
+                    VarToken => {
+                        self.builder.start_node(VarDeclNode.into());
+                        todo!();
+                        self.builder.finish_node();
+                    }
+                    // statements
+                    _ => {
+                        self.parse_stmt();
+                    }
+                }
+                self.builder.finish_node()
+            }
+        }
+    }
+
+    /// parse a program
     pub fn parse(mut self) -> SyntaxNode {
-        self.builder.start_node(SyntaxKind::ExprNode.into());
-        self.parse_expr(BindingPower::Zero);
+        self.builder.start_node(SyntaxKind::RootNode.into());
+        while self.peek().is_some() {
+            self.parse_decl();
+        }
         self.builder.finish_node();
 
         SyntaxNode::new_root(self.builder.finish())

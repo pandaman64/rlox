@@ -161,8 +161,21 @@ impl Vm {
             match OpCode::from_u8(instruction) {
                 None => return InterpetResult::CompileError,
                 Some(Return) => {
-                    try_pop!(self);
                     return InterpetResult::Ok;
+                }
+                Some(Print) => {
+                    match self.stack.pop() {
+                        None => {
+                            eprintln!("no stack");
+                            return InterpetResult::RuntimeError;
+                        }
+                        Some(v) => {
+                            // SAFETY: v is a valid value
+                            unsafe {
+                                println!("{}", v.format_args());
+                            }
+                        }
+                    }
                 }
                 Some(Constant) => {
                     let index = usize::from(chunk.code[self.ip]);

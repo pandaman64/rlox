@@ -1,5 +1,5 @@
 use crate::{
-    ast::{BinOpKind, Expr, Primary, UnaryOpKind},
+    ast::{BinOpKind, Declaration, Expr, Primary, Stmt, UnaryOpKind},
     value::Value,
     vm::Vm,
     Chunk, OpCode,
@@ -65,5 +65,25 @@ pub fn gen_expr(vm: &mut Vm, chunk: &mut Chunk, expr: Expr) {
                 chunk.push_code(index, 0);
             }
         },
+    }
+}
+
+pub fn gen_stmt(vm: &mut Vm, chunk: &mut Chunk, stmt: Stmt) {
+    match stmt {
+        Stmt::ExprStmt(stmt) => {
+            gen_expr(vm, chunk, stmt.expr().unwrap());
+            // TODO: pop value
+        }
+        Stmt::PrintStmt(stmt) => {
+            gen_expr(vm, chunk, stmt.expr().unwrap());
+            chunk.push_code(OpCode::Print as _, 0);
+        }
+    }
+}
+
+pub fn gen_decl(vm: &mut Vm, chunk: &mut Chunk, decl: Declaration) {
+    match decl {
+        Declaration::VarDecl(_) => todo!(),
+        Declaration::Stmt(stmt) => gen_stmt(vm, chunk, stmt),
     }
 }

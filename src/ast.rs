@@ -254,3 +254,121 @@ impl Expr {
         })
     }
 }
+
+#[derive(Debug)]
+pub struct VarDecl {
+    inner: SyntaxNode,
+}
+
+impl VarDecl {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::VarDeclNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ExprStmt {
+    inner: SyntaxNode,
+}
+
+impl ExprStmt {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::ExprStmtNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn expr(&self) -> Option<Expr> {
+        self.inner.children().filter_map(Expr::cast).next()
+    }
+}
+
+#[derive(Debug)]
+pub struct PrintStmt {
+    inner: SyntaxNode,
+}
+
+impl PrintStmt {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::PrintStmtNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn expr(&self) -> Option<Expr> {
+        self.inner.children().filter_map(Expr::cast).next()
+    }
+}
+
+#[derive(Debug)]
+pub enum Stmt {
+    ExprStmt(ExprStmt),
+    PrintStmt(PrintStmt),
+}
+
+impl Stmt {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        use SyntaxKind::*;
+
+        if inner.kind() == SyntaxKind::StmtNode {
+            let child = inner.first_child()?;
+            Some(match child.kind() {
+                ExprStmtNode => Self::ExprStmt(ExprStmt::cast(child)?),
+                PrintStmtNode => Self::PrintStmt(PrintStmt::cast(child)?),
+                _ => return None,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Declaration {
+    VarDecl(VarDecl),
+    Stmt(Stmt),
+}
+
+impl Declaration {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        use SyntaxKind::*;
+
+        if inner.kind() == DeclNode {
+            let child = inner.first_child()?;
+            Some(match child.kind() {
+                VarDeclNode => Self::VarDecl(VarDecl::cast(child)?),
+                StmtNode => Self::Stmt(Stmt::cast(child)?),
+                _ => return None,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Root {
+    inner: SyntaxNode,
+}
+
+impl Root {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::RootNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn decls(&self) -> impl Iterator<Item = Declaration> + '_ {
+        self.inner.children().filter_map(Declaration::cast)
+    }
+}

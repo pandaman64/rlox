@@ -97,10 +97,30 @@ pub enum SyntaxKind {
     WhileToken,
 
     // nodes
+    // expressions
     UnaryOpNode,
     BinOpNode,
     PrimaryExprNode,
     ExprNode,
+
+    // declarations
+    ClassDeclNode,
+    FunDeclNode,
+    VarDeclNode,
+    DeclNode,
+
+    // statements,
+    ExprStmtNode,
+    ForStmtNode,
+    IfStmtNode,
+    PrintStmtNode,
+    ReturnStmtNode,
+    WhileStmtNode,
+    BlockStmtNode,
+    StmtNode,
+
+    // program root
+    RootNode,
 }
 
 impl From<SyntaxKind> for rowan::SyntaxKind {

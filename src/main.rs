@@ -22,7 +22,7 @@ use std::{
 use value::Value;
 use vm::Vm;
 
-use crate::ast::Expr;
+use crate::ast::Root;
 
 pub fn trace_available() -> bool {
     static AVAILABLE: AtomicBool = AtomicBool::new(false);
@@ -52,6 +52,7 @@ pub enum OpCode {
     Multiply,
     Divide,
     Return,
+    Print,
 }
 
 #[derive(Default)]
@@ -110,6 +111,7 @@ impl Chunk {
             Some(Multiply) => trace_simple_code(offset, "OP_MUL"),
             Some(Divide) => trace_simple_code(offset, "OP_DIV"),
             Some(Return) => trace_simple_code(offset, "OP_RETURN"),
+            Some(Print) => trace_simple_code(offset, "OP_PRINT"),
         }
     }
 
@@ -183,14 +185,16 @@ fn main() -> std::io::Result<()> {
         let mut vm = Vm::new();
         let node = syntax::parse(&line);
         eprintln!("{:#?}", node);
-        let chunk = match Expr::cast(node) {
+        let chunk = match Root::cast(node) {
             None => {
                 eprintln!("syntax error");
                 continue;
             }
-            Some(expr) => {
+            Some(root) => {
                 let mut chunk = Chunk::default();
-                codegen::gen_expr(&mut vm, &mut chunk, expr);
+                for decl in root.decls() {
+                    codegen::gen_decl(&mut vm, &mut chunk, decl);
+                }
                 chunk.push_code(OpCode::Return as _, 0);
                 chunk
             }
