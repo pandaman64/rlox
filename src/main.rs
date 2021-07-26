@@ -5,6 +5,7 @@ mod ast;
 mod codegen;
 mod object;
 mod syntax;
+mod table;
 mod value;
 mod vm;
 

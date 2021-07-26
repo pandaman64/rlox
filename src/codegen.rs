@@ -55,7 +55,7 @@ pub fn gen_expr(vm: &mut Vm, chunk: &mut Chunk, expr: Expr) {
             }
             Primary::StringLiteral(s) => {
                 let obj = vm.allocate_string(s.to_str());
-                let index = chunk.push_constant(Value::Object(obj));
+                let index = chunk.push_constant(Value::Object(obj.into_raw_obj()));
                 chunk.push_code(OpCode::Constant as _, 0);
                 chunk.push_code(index, 0);
             }

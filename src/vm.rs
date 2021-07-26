@@ -1,7 +1,8 @@
-use std::{mem::discriminant, ptr};
+use std::{collections::HashSet, mem::discriminant, ptr};
 
 use crate::{
-    object::{self, Header, ObjectKind, RawObject},
+    object::{self, ObjectKind, RawObject, RawStr},
+    table::InternedStr,
     trace_available,
     value::Value,
     Chunk, OpCode,
@@ -59,6 +60,7 @@ pub struct Vm {
     ip: usize,
     stack: Vec<Value>,
     objects: Option<RawObject>,
+    strings: HashSet<InternedStr>,
 }
 
 impl Vm {
@@ -67,6 +69,7 @@ impl Vm {
             ip: 0,
             stack: vec![],
             objects: None,
+            strings: HashSet::new(),
         }
     }
 
@@ -111,14 +114,24 @@ impl Vm {
         }
     }
 
-    pub fn allocate_string(&mut self, content: String) -> RawObject {
+    pub fn allocate_string(&mut self, content: String) -> InternedStr {
         unsafe {
             let s = object::Str::new(content);
-            let header_ptr = Box::leak(Box::new(s)) as *mut object::Str as *mut Header;
-            // SAFETY: header_ptr is a non-null pointer pointing to an initialized string object.
-            let obj = RawObject::new_unchecked(header_ptr);
-            self.add_object_head(obj);
-            obj
+            // SAFETY: the pointer passed to InternedStr::new is a valid pointer to the string
+            let str_ptr = InternedStr::new(RawStr::from(Box::leak(Box::new(s))));
+
+            match self.strings.get(&str_ptr) {
+                None => {
+                    self.add_object_head(str_ptr.clone().into_raw_obj());
+                    self.strings.insert(str_ptr.clone());
+                    str_ptr
+                }
+                Some(interned) => {
+                    // free the constructed string since we return from the strings table
+                    drop(Box::from_raw(str_ptr.into_inner().as_ptr()));
+                    interned.clone()
+                }
+            }
         }
     }
 
@@ -207,7 +220,7 @@ impl Vm {
                                 (Some(o1), Some(o2)) => {
                                     let result = o1.content.clone() + &o2.content;
                                     let obj = self.allocate_string(result);
-                                    self.stack.push(Value::Object(obj));
+                                    self.stack.push(Value::Object(obj.into_raw_obj()));
                                 }
                                 _ => {
                                     eprintln!("type mismatch in addition");

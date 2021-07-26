@@ -2,6 +2,7 @@ use std::ptr::{self, NonNull};
 
 // the pointer must have valid provenance not only for the header but the whole object
 pub type RawObject = NonNull<Header>;
+pub type RawStr = NonNull<Str>;
 
 #[repr(u8)]
 pub enum ObjectKind {
