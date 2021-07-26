@@ -1,6 +1,11 @@
-use std::mem::discriminant;
+use std::{mem::discriminant, ptr};
 
-use crate::{trace_available, value::Value, Chunk, OpCode};
+use crate::{
+    object::{self, Header, ObjectKind, RawObject},
+    trace_available,
+    value::Value,
+    Chunk, OpCode,
+};
 use num::FromPrimitive as _;
 
 macro_rules! try_pop {
@@ -27,7 +32,7 @@ macro_rules! check_top {
                 return InterpetResult::RuntimeError;
             }
             Some(v) => {
-                eprintln!("Expected {}, got {}", stringify!($variant), v);
+                eprintln!("Expected {}, got {:?}", stringify!($variant), v);
                 return InterpetResult::RuntimeError;
             }
         }
@@ -50,40 +55,95 @@ pub enum InterpetResult {
     RuntimeError,
 }
 
-pub struct Vm<'c> {
-    chunk: &'c Chunk,
+pub struct Vm {
     ip: usize,
     stack: Vec<Value>,
+    objects: Option<RawObject>,
 }
 
-impl<'c> Vm<'c> {
-    pub fn new(chunk: &'c Chunk) -> Self {
+impl Vm {
+    pub fn new() -> Self {
         Self {
-            chunk,
             ip: 0,
             stack: vec![],
+            objects: None,
         }
     }
 
-    pub fn run(&mut self) -> InterpetResult {
-        use crate::object;
+    /// SAFETY: `obj` must points to an initialized object.
+    /// `obj.next` must not point to another valid object. Otherwise, the object can be leaked.
+    unsafe fn add_object_head(&mut self, obj: RawObject) {
+        // SAFETY: obj is initialized
+        unsafe {
+            let obj_ptr = obj.as_ptr();
+            let next_ptr = ptr::addr_of_mut!((*obj_ptr).next);
+            assert!(ptr::read(next_ptr).is_none());
+            ptr::write(next_ptr, self.objects);
+
+            self.objects = Some(obj);
+        }
+    }
+
+    /// SAFETY: no chunks referring to objects managed by this vm can be run after calling free_objects
+    pub unsafe fn free_all_objects(&mut self) {
+        while let Some(obj) = { self.objects } {
+            // SAFETY: self.objects points to an initialized object and covers the whole allocation
+            // in an type-safe manner. this property must be guaranteed by allocation methods.
+            unsafe {
+                // since we carefully avoid using references in this implementation, all pointers
+                // declared here should share the same permission for accessing the object `obj`
+                // points to. moreover, obj_ptr should have the right provenance for the whole
+                // object, not only for the header.
+                let obj_ptr = obj.as_ptr();
+                let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
+                let next_ptr = ptr::addr_of_mut!((*obj_ptr).next);
+                self.objects = ptr::read(next_ptr);
+
+                // we assume that runtime type of the values are correct, so that we can cast back
+                // to the original types and deallocate them here.
+                match ptr::read(kind_ptr) {
+                    ObjectKind::String => {
+                        let str_ptr = obj_ptr as *mut object::Str;
+                        drop(Box::from_raw(str_ptr));
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn allocate_string(&mut self, content: String) -> RawObject {
+        unsafe {
+            let s = object::Str::new(content);
+            let header_ptr = Box::leak(Box::new(s)) as *mut object::Str as *mut Header;
+            // SAFETY: header_ptr is a non-null pointer pointing to an initialized string object.
+            let obj = RawObject::new_unchecked(header_ptr);
+            self.add_object_head(obj);
+            obj
+        }
+    }
+
+    // SAFETY: constants in chunk must be valid
+    pub unsafe fn run(&mut self, chunk: &Chunk) -> InterpetResult {
         use OpCode::*;
         use Value::*;
 
         loop {
             if trace_available() {
-                // print current stack
-                eprint!("          ");
-                for slot in self.stack.iter() {
-                    eprint!("[ {} ]", slot);
-                }
-                eprintln!();
+                // SAFETY: constants in chunk are valid
+                unsafe {
+                    // print current stack
+                    eprint!("          ");
+                    for slot in self.stack.iter() {
+                        eprint!("[ {} ]", slot.format_args());
+                    }
+                    eprintln!();
 
-                // print current instruction
-                self.chunk.trace_code(self.ip);
+                    // print current instruction
+                    chunk.trace_code(self.ip);
+                }
             }
 
-            let instruction = self.chunk.code[self.ip];
+            let instruction = chunk.code[self.ip];
             self.ip += 1;
             match OpCode::from_u8(instruction) {
                 None => return InterpetResult::CompileError,
@@ -92,9 +152,9 @@ impl<'c> Vm<'c> {
                     return InterpetResult::Ok;
                 }
                 Some(Constant) => {
-                    let index = usize::from(self.chunk.code[self.ip]);
+                    let index = usize::from(chunk.code[self.ip]);
                     self.ip += 1;
-                    let constant = self.chunk.constants[index].clone();
+                    let constant = chunk.constants[index].clone();
                     self.stack.push(constant);
                 }
                 Some(OpCode::Nil) => {
@@ -111,10 +171,12 @@ impl<'c> Vm<'c> {
                     let v1 = try_pop!(self);
 
                     if discriminant(&v1) != discriminant(&v2) {
-                        eprintln!("type mismatch between {} and {}", v1, v2);
+                        eprintln!("type mismatch in equality operation");
                         return InterpetResult::RuntimeError;
                     }
-                    self.stack.push(Value::Bool(v1 == v2));
+                    // SAFETY: v1 and v2 are valid object
+                    let eq = unsafe { v1.eq(&v2) };
+                    self.stack.push(Value::Bool(eq));
                 }
                 Some(Less) => binop!(self, Number, <, Bool),
                 Some(Greater) => binop!(self, Number, >, Bool),
@@ -135,23 +197,29 @@ impl<'c> Vm<'c> {
                         return InterpetResult::RuntimeError;
                     }
                     match &self.stack[len - 2..] {
-                        [Object(object::Object::String(_)), Object(object::Object::String(_))] => {
+                        [Object(_), Object(_)] => {
                             // we will be adding other variants
-                            #[allow(clippy::infallible_destructuring_match)]
-                            let v2 = match try_pop!(self, Object) {
-                                object::Object::String(s2) => s2,
-                            };
-                            #[allow(clippy::infallible_destructuring_match)]
-                            let v1 = match try_pop!(self, Object) {
-                                object::Object::String(s1) => s1,
-                            };
-                            self.stack.push(Object(object::Object::String(v1 + &v2)));
+                            let o2 = try_pop!(self, Object);
+                            let o1 = try_pop!(self, Object);
+
+                            // SAFETY: these objects are valid
+                            match unsafe { (object::try_as_str(&o1), object::try_as_str(&o2)) } {
+                                (Some(o1), Some(o2)) => {
+                                    let result = o1.content.clone() + &o2.content;
+                                    let obj = self.allocate_string(result);
+                                    self.stack.push(Value::Object(obj));
+                                }
+                                _ => {
+                                    eprintln!("type mismatch in addition");
+                                    return InterpetResult::RuntimeError;
+                                }
+                            }
                         }
                         [Number(_), Number(_)] => {
                             binop!(self, Number, +, Number);
                         }
-                        [v2, v1] => {
-                            eprintln!("type mismatch between {} and {}", v2, v1);
+                        [_v2, _v1] => {
+                            eprintln!("type mismatch in addition");
                             return InterpetResult::RuntimeError;
                         }
                         _ => unreachable!(),

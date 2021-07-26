@@ -1,4 +1,4 @@
-#![deny(rust_2018_idioms)]
+#![deny(rust_2018_idioms, unsafe_op_in_unsafe_fn)]
 // #![warn(unreachable_pub)]
 
 mod ast;
@@ -66,17 +66,21 @@ fn trace_simple_code(offset: usize, s: &str) -> usize {
     offset + 1
 }
 
-fn trace_constant_code(chunk: &Chunk, offset: usize, s: &str) -> usize {
+/// SAFETY: constants in chunk must be valid
+unsafe fn trace_constant_code(chunk: &Chunk, offset: usize, s: &str) -> usize {
     let constant_index = usize::from(chunk.code[offset + 1]);
-    eprintln!(
-        "{:-16} {:4} '{}'",
-        s, constant_index, chunk.constants[constant_index]
-    );
+    eprintln!("{:-16} {:4} '{}'", s, constant_index, unsafe {
+        chunk.constants[constant_index].format_args()
+    });
     offset + 2
 }
 
 impl Chunk {
-    pub fn trace_code(&self, offset: usize) -> usize {
+    // I don't know why only this function triggers clippy warning about missing SAFETY section
+    /// # Safety
+    ///
+    /// constants in this chunk must be valid
+    pub unsafe fn trace_code(&self, offset: usize) -> usize {
         let code = self.code[offset];
         use OpCode::*;
 
@@ -91,7 +95,10 @@ impl Chunk {
             Some(Nil) => trace_simple_code(offset, "OP_NIL"),
             Some(True) => trace_simple_code(offset, "OP_TRUE"),
             Some(False) => trace_simple_code(offset, "OP_FALSE"),
-            Some(Constant) => trace_constant_code(self, offset, "OP_CONSTANT"),
+            Some(Constant) => {
+                // SAFETY: constants in this chunk are valid
+                unsafe { trace_constant_code(self, offset, "OP_CONSTANT") }
+            }
             Some(Negate) => trace_simple_code(offset, "OP_NEGATE"),
             Some(Not) => trace_simple_code(offset, "OP_NOT"),
             Some(Equal) => trace_simple_code(offset, "OP_EQUAL"),
@@ -105,12 +112,16 @@ impl Chunk {
         }
     }
 
-    fn trace_chunk(&self, name: &str) {
+    /// SAFETY: constants in this chunk must be valid
+    unsafe fn trace_chunk(&self, name: &str) {
         if trace_available() {
             eprintln!("== {} ==", name);
             let mut offset = 0;
             while offset < self.code.len() {
-                offset = self.trace_code(offset);
+                // SAFETY: constants in this chunk are valid
+                unsafe {
+                    offset = self.trace_code(offset);
+                }
             }
         }
     }
@@ -168,6 +179,7 @@ fn main() -> std::io::Result<()> {
             break;
         }
 
+        let mut vm = Vm::new();
         let node = syntax::parse(&line);
         eprintln!("{:#?}", node);
         let chunk = match Expr::cast(node) {
@@ -177,15 +189,21 @@ fn main() -> std::io::Result<()> {
             }
             Some(expr) => {
                 let mut chunk = Chunk::default();
-                codegen::gen_expr(&mut chunk, expr);
+                codegen::gen_expr(&mut vm, &mut chunk, expr);
                 chunk.push_code(OpCode::Return as _, 0);
                 chunk
             }
         };
-        chunk.trace_chunk(line.trim());
+        // SAFETY: we construct a chunk with valid constants
+        unsafe {
+            chunk.trace_chunk(line.trim());
+            vm.run(&chunk);
+        }
 
-        let mut vm = Vm::new(&chunk);
-        vm.run();
+        // SAFETY: we don't reuse vm and chunk, so no code can refer to deallocated objects.
+        unsafe {
+            vm.free_all_objects();
+        }
     }
 
     Ok(())

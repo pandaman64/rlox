@@ -1,15 +1,15 @@
 use crate::{
     ast::{BinOpKind, Expr, Primary, UnaryOpKind},
-    object::Object,
     value::Value,
+    vm::Vm,
     Chunk, OpCode,
 };
 
-pub fn gen_expr(chunk: &mut Chunk, expr: Expr) {
+pub fn gen_expr(vm: &mut Vm, chunk: &mut Chunk, expr: Expr) {
     match expr {
         Expr::UnaryOp(expr) => {
             let operand = Expr::cast(expr.operand().unwrap()).unwrap();
-            gen_expr(chunk, operand);
+            gen_expr(vm, chunk, operand);
             let opcode = match expr.kind() {
                 UnaryOpKind::Negation => OpCode::Negate,
                 UnaryOpKind::Not => OpCode::Not,
@@ -19,7 +19,7 @@ pub fn gen_expr(chunk: &mut Chunk, expr: Expr) {
         Expr::BinOp(expr) => {
             for operand in expr.operands() {
                 let operand = Expr::cast(operand).unwrap();
-                gen_expr(chunk, operand);
+                gen_expr(vm, chunk, operand);
             }
             let opcodes: &[OpCode] = match expr.kind() {
                 BinOpKind::Assignment => todo!(),
@@ -54,7 +54,8 @@ pub fn gen_expr(chunk: &mut Chunk, expr: Expr) {
                 }
             }
             Primary::StringLiteral(s) => {
-                let index = chunk.push_constant(Value::Object(Object::String(s.to_str())));
+                let obj = vm.allocate_string(s.to_str());
+                let index = chunk.push_constant(Value::Object(obj));
                 chunk.push_code(OpCode::Constant as _, 0);
                 chunk.push_code(index, 0);
             }
