@@ -3,6 +3,7 @@
 
 mod ast;
 mod codegen;
+mod object;
 mod syntax;
 mod value;
 mod vm;

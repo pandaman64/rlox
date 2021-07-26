@@ -66,6 +66,7 @@ impl<'c> Vm<'c> {
     }
 
     pub fn run(&mut self) -> InterpetResult {
+        use crate::object;
         use OpCode::*;
         use Value::*;
 
@@ -127,7 +128,35 @@ impl<'c> Vm<'c> {
                     let value = try_pop!(self, Bool);
                     self.stack.push(Bool(!value))
                 }
-                Some(Add) => binop!(self, Number, +, Number),
+                Some(Add) => {
+                    let len = self.stack.len();
+                    if len < 2 {
+                        eprintln!("insufficient stack");
+                        return InterpetResult::RuntimeError;
+                    }
+                    match &self.stack[len - 2..] {
+                        [Object(object::Object::String(_)), Object(object::Object::String(_))] => {
+                            // we will be adding other variants
+                            #[allow(clippy::infallible_destructuring_match)]
+                            let v2 = match try_pop!(self, Object) {
+                                object::Object::String(s2) => s2,
+                            };
+                            #[allow(clippy::infallible_destructuring_match)]
+                            let v1 = match try_pop!(self, Object) {
+                                object::Object::String(s1) => s1,
+                            };
+                            self.stack.push(Object(object::Object::String(v1 + &v2)));
+                        }
+                        [Number(_), Number(_)] => {
+                            binop!(self, Number, +, Number);
+                        }
+                        [v2, v1] => {
+                            eprintln!("type mismatch between {} and {}", v2, v1);
+                            return InterpetResult::RuntimeError;
+                        }
+                        _ => unreachable!(),
+                    }
+                }
                 Some(Subtract) => binop!(self, Number, -, Number),
                 Some(Multiply) => binop!(self, Number, *, Number),
                 Some(Divide) => binop!(self, Number, /, Number),

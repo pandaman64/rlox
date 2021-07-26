@@ -140,6 +140,12 @@ impl StringLiteral {
             None
         }
     }
+
+    pub fn to_str(&self) -> String {
+        // this text represents the whole literal including "
+        let text = self.inner.text();
+        text[1..(text.len() - 1)].to_string()
+    }
 }
 
 #[derive(Debug)]
@@ -157,7 +163,7 @@ impl NumberLiteral {
     }
 
     pub fn to_number(&self) -> f64 {
-        self.inner.text().to_string().parse().unwrap()
+        self.inner.text().parse().unwrap()
     }
 }
 
