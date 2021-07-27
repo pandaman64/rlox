@@ -125,6 +125,10 @@ impl Identifier {
             None
         }
     }
+
+    pub fn to_str(&self) -> &str {
+        self.inner.text()
+    }
 }
 
 #[derive(Debug)]
@@ -141,10 +145,10 @@ impl StringLiteral {
         }
     }
 
-    pub fn to_str(&self) -> String {
+    pub fn to_str(&self) -> &str {
         // this text represents the whole literal including "
         let text = self.inner.text();
-        text[1..(text.len() - 1)].to_string()
+        &text[1..(text.len() - 1)]
     }
 }
 
@@ -268,6 +272,20 @@ impl VarDecl {
             None
         }
     }
+
+    pub fn ident(&self) -> Option<Identifier> {
+        self.inner
+            .children_with_tokens()
+            .filter_map(|child| match child {
+                NodeOrToken::Token(token) => Identifier::cast(token),
+                _ => None,
+            })
+            .next()
+    }
+
+    pub fn expr(&self) -> Option<Expr> {
+        self.inner.children().filter_map(Expr::cast).next()
+    }
 }
 
 #[derive(Debug)]
@@ -332,12 +350,12 @@ impl Stmt {
 }
 
 #[derive(Debug)]
-pub enum Declaration {
+pub enum Decl {
     VarDecl(VarDecl),
     Stmt(Stmt),
 }
 
-impl Declaration {
+impl Decl {
     pub fn cast(inner: SyntaxNode) -> Option<Self> {
         use SyntaxKind::*;
 
@@ -368,7 +386,7 @@ impl Root {
         }
     }
 
-    pub fn decls(&self) -> impl Iterator<Item = Declaration> + '_ {
-        self.inner.children().filter_map(Declaration::cast)
+    pub fn decls(&self) -> impl Iterator<Item = Decl> + '_ {
+        self.inner.children().filter_map(Decl::cast)
     }
 }

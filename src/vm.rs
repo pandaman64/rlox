@@ -1,11 +1,15 @@
-use std::{collections::HashSet, mem::discriminant, ptr};
+use std::{
+    collections::{HashMap, HashSet},
+    mem::discriminant,
+    ptr,
+};
 
 use crate::{
     object::{self, ObjectKind, RawObject, RawStr},
-    table::InternedStr,
+    opcode::{Chunk, OpCode},
+    table::{InternedStr, Key},
     trace_available,
     value::Value,
-    Chunk, OpCode,
 };
 use num::FromPrimitive as _;
 
@@ -61,6 +65,7 @@ pub struct Vm {
     stack: Vec<Value>,
     objects: Option<RawObject>,
     strings: HashSet<InternedStr>,
+    globals: HashMap<Key, Value>,
 }
 
 impl Vm {
@@ -70,6 +75,7 @@ impl Vm {
             stack: vec![],
             objects: None,
             strings: HashSet::new(),
+            globals: HashMap::new(),
         }
     }
 
@@ -89,6 +95,9 @@ impl Vm {
 
     /// SAFETY: no chunks referring to objects managed by this vm can be run after calling free_objects
     pub unsafe fn free_all_objects(&mut self) {
+        self.strings.clear();
+        self.globals.clear();
+
         while let Some(obj) = { self.objects } {
             // SAFETY: self.objects points to an initialized object and covers the whole allocation
             // in an type-safe manner. this property must be guaranteed by allocation methods.
@@ -156,7 +165,7 @@ impl Vm {
                 }
             }
 
-            let instruction = chunk.code[self.ip];
+            let instruction = chunk.code()[self.ip];
             self.ip += 1;
             match OpCode::from_u8(instruction) {
                 None => return InterpetResult::CompileError,
@@ -178,20 +187,59 @@ impl Vm {
                     }
                 }
                 Some(Constant) => {
-                    let index = usize::from(chunk.code[self.ip]);
+                    let index = usize::from(chunk.code()[self.ip]);
                     self.ip += 1;
-                    let constant = chunk.constants[index].clone();
+                    let constant = chunk.constants()[index].clone();
                     self.stack.push(constant);
                 }
-                Some(Pop) => {
-                    match self.stack.pop() {
+                Some(DefineGlobal) => {
+                    let index = usize::from(chunk.code()[self.ip]);
+                    self.ip += 1;
+                    let ident = chunk.constants()[index].clone();
+                    let key = match ident {
+                        Object(obj) => {
+                            let obj_ptr = obj.as_ptr();
+                            let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
+
+                            unsafe {
+                                // SAFETY: obj points to a valid constant value
+                                let kind = ptr::read(kind_ptr);
+                                match kind {
+                                    ObjectKind::String => {
+                                        let str_ptr = obj_ptr as *mut object::Str;
+                                        let str_ptr = RawStr::new(str_ptr).unwrap();
+                                        // SAFETY: we intern all string appears in the program execution
+                                        Key::new(InternedStr::new(str_ptr))
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            eprintln!("OP_DEFINE_GLOBAL takes a string constant");
+                            return InterpetResult::CompileError;
+                        }
+                    };
+                    match self.stack.last() {
                         None => {
                             eprintln!("no stack");
                             return InterpetResult::RuntimeError;
                         }
-                        Some(_) => {}
+                        Some(value) => {
+                            self.globals.insert(key, value.clone());
+                        }
                     }
+                    // we pop the value after inserting to globals table so that we can run GC
+                    // during table insertion. however, since we rely on std's hash table, we don't
+                    // think we can run GC in insertion in this implementation.
+                    self.stack.pop();
                 }
+                Some(Pop) => match self.stack.pop() {
+                    None => {
+                        eprintln!("no stack");
+                        return InterpetResult::RuntimeError;
+                    }
+                    Some(_) => {}
+                },
                 Some(OpCode::Nil) => {
                     self.stack.push(Value::Nil);
                 }

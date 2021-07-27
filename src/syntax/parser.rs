@@ -162,7 +162,7 @@ where
         use SyntaxKind::*;
 
         match self.peek() {
-            None => {},
+            None => {}
             Some(token) => {
                 self.builder.start_node(SyntaxKind::StmtNode.into());
                 match token {
@@ -190,13 +190,19 @@ where
         use SyntaxKind::*;
 
         match self.peek() {
-            None => {},
+            None => {}
             Some(token) => {
                 self.builder.start_node(DeclNode.into());
                 match token {
                     VarToken => {
                         self.builder.start_node(VarDeclNode.into());
-                        todo!();
+                        self.bump();
+                        self.expect(IdentifierToken);
+                        if matches!(self.peek(), Some(EqualToken)) {
+                            self.bump();
+                            self.parse_expr(BindingPower::Zero);
+                        }
+                        self.expect(SemicolonToken);
                         self.builder.finish_node();
                     }
                     // statements

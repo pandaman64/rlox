@@ -1,8 +1,8 @@
 use crate::{
-    ast::{BinOpKind, Declaration, Expr, Primary, Stmt, UnaryOpKind},
+    ast::{BinOpKind, Decl, Expr, Primary, Stmt, UnaryOpKind},
+    opcode::{Chunk, OpCode},
     value::Value,
     vm::Vm,
-    Chunk, OpCode,
 };
 
 pub fn gen_expr(vm: &mut Vm, chunk: &mut Chunk, expr: Expr) {
@@ -54,7 +54,7 @@ pub fn gen_expr(vm: &mut Vm, chunk: &mut Chunk, expr: Expr) {
                 }
             }
             Primary::StringLiteral(s) => {
-                let obj = vm.allocate_string(s.to_str());
+                let obj = vm.allocate_string(s.to_str().into());
                 let index = chunk.push_constant(Value::Object(obj.into_raw_obj()));
                 chunk.push_code(OpCode::Constant as _, 0);
                 chunk.push_code(index, 0);
@@ -81,9 +81,18 @@ pub fn gen_stmt(vm: &mut Vm, chunk: &mut Chunk, stmt: Stmt) {
     }
 }
 
-pub fn gen_decl(vm: &mut Vm, chunk: &mut Chunk, decl: Declaration) {
+pub fn gen_decl(vm: &mut Vm, chunk: &mut Chunk, decl: Decl) {
     match decl {
-        Declaration::VarDecl(_) => todo!(),
-        Declaration::Stmt(stmt) => gen_stmt(vm, chunk, stmt),
+        Decl::VarDecl(decl) => {
+            let ident = vm.allocate_string(decl.ident().unwrap().to_str().into());
+            let index = chunk.push_constant(Value::Object(ident.into_raw_obj()));
+
+            if let Some(expr) = decl.expr() {
+                gen_expr(vm, chunk, expr);
+            }
+            chunk.push_code(OpCode::DefineGlobal as _, 0);
+            chunk.push_code(index, 0);
+        }
+        Decl::Stmt(stmt) => gen_stmt(vm, chunk, stmt),
     }
 }
