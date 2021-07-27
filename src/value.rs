@@ -1,4 +1,5 @@
 use core::fmt;
+use std::ptr;
 
 use crate::object::{self, RawObject};
 
@@ -58,7 +59,8 @@ impl Value {
             (Object(o1), Object(o2)) => {
                 // SAFETY: these objects are valid
                 match unsafe { (object::try_as_str(o1), object::try_as_str(o2)) } {
-                    (Some(o1), Some(o2)) => o1.content == o2.content,
+                    // strings are interned
+                    (Some(_), Some(_)) => ptr::eq(o1.as_ptr(), o2.as_ptr()),
                     _ => false,
                 }
             }
