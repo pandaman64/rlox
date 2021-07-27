@@ -176,6 +176,7 @@ impl Vm {
 
     // SAFETY: constants in chunk must be valid
     pub unsafe fn run(&mut self, chunk: &Chunk) -> InterpetResult {
+        use std::collections::hash_map::Entry;
         use OpCode::*;
         use Value::*;
 
@@ -261,6 +262,31 @@ impl Vm {
                         }
                     };
                     self.stack.push(value.clone());
+                }
+                Some(SetGlobal) => {
+                    let key = match self.extract_constant_key(chunk) {
+                        Some(key) => key,
+                        None => {
+                            eprintln!("OP_SET_GLOBAL takes a string constant");
+                            return InterpetResult::CompileError;
+                        }
+                    };
+                    // assignments leave the value untouched, so we don't pop here
+                    match self.stack.last() {
+                        None => {
+                            eprintln!("no stack for OP_SET_GLOBAL");
+                            return InterpetResult::RuntimeError;
+                        }
+                        Some(value) => match self.globals.entry(key) {
+                            Entry::Vacant(v) => {
+                                eprintln!("undefined variable: {}", v.key().display());
+                                return InterpetResult::RuntimeError;
+                            }
+                            Entry::Occupied(mut o) => {
+                                o.insert(value.clone());
+                            }
+                        },
+                    }
                 }
                 Some(Pop) => match self.stack.pop() {
                     None => {

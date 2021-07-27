@@ -107,8 +107,8 @@ impl BinOp {
         }
     }
 
-    pub fn operands(&self) -> impl Iterator<Item = SyntaxNode> {
-        self.inner.children()
+    pub fn operands(&self) -> impl Iterator<Item = Expr> {
+        self.inner.children().filter_map(Expr::cast)
     }
 }
 
