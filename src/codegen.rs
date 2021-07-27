@@ -42,7 +42,13 @@ pub fn gen_expr(vm: &mut Vm, chunk: &mut Chunk, expr: Expr) {
             }
         }
         Expr::Primary(expr) => match expr {
-            Primary::Identifier(_ident) => todo!(),
+            Primary::Identifier(ident) => {
+                let ident = vm.allocate_string(ident.to_str().into());
+                let index = chunk.push_constant(Value::Object(ident.into_raw_obj()));
+
+                chunk.push_code(OpCode::GetGlobal as _, 0);
+                chunk.push_code(index, 0);
+            }
             Primary::NilLiteral(_) => {
                 chunk.push_code(OpCode::Nil as _, 0);
             }

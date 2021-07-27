@@ -144,10 +144,43 @@ impl Vm {
         }
     }
 
+    fn extract_constant(&mut self, chunk: &Chunk) -> Value {
+        let index = usize::from(chunk.code()[self.ip]);
+        self.ip += 1;
+        chunk.constants()[index].clone()
+    }
+
+    fn extract_constant_key(&mut self, chunk: &Chunk) -> Option<Key> {
+        let ident = self.extract_constant(chunk);
+        match ident {
+            Value::Object(obj) => {
+                unsafe {
+                    let obj_ptr = obj.as_ptr();
+                    // SAFETY: obj points to a valid constant value
+                    let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
+                    // SAFETY: obj points to a valid constant value
+                    let kind = ptr::read(kind_ptr);
+                    match kind {
+                        ObjectKind::String => {
+                            let str_ptr = obj_ptr as *mut object::Str;
+                            let str_ptr = RawStr::new(str_ptr).unwrap();
+                            // SAFETY: we intern all string appears in the program execution
+                            Some(Key::new(InternedStr::new(str_ptr)))
+                        }
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+
     // SAFETY: constants in chunk must be valid
     pub unsafe fn run(&mut self, chunk: &Chunk) -> InterpetResult {
         use OpCode::*;
         use Value::*;
+
+        self.ip = 0;
+        self.stack = vec![];
 
         loop {
             if trace_available() {
@@ -187,34 +220,13 @@ impl Vm {
                     }
                 }
                 Some(Constant) => {
-                    let index = usize::from(chunk.code()[self.ip]);
-                    self.ip += 1;
-                    let constant = chunk.constants()[index].clone();
+                    let constant = self.extract_constant(chunk);
                     self.stack.push(constant);
                 }
                 Some(DefineGlobal) => {
-                    let index = usize::from(chunk.code()[self.ip]);
-                    self.ip += 1;
-                    let ident = chunk.constants()[index].clone();
-                    let key = match ident {
-                        Object(obj) => {
-                            let obj_ptr = obj.as_ptr();
-                            let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
-
-                            unsafe {
-                                // SAFETY: obj points to a valid constant value
-                                let kind = ptr::read(kind_ptr);
-                                match kind {
-                                    ObjectKind::String => {
-                                        let str_ptr = obj_ptr as *mut object::Str;
-                                        let str_ptr = RawStr::new(str_ptr).unwrap();
-                                        // SAFETY: we intern all string appears in the program execution
-                                        Key::new(InternedStr::new(str_ptr))
-                                    }
-                                }
-                            }
-                        }
-                        _ => {
+                    let key = match self.extract_constant_key(chunk) {
+                        Some(key) => key,
+                        None => {
                             eprintln!("OP_DEFINE_GLOBAL takes a string constant");
                             return InterpetResult::CompileError;
                         }
@@ -232,6 +244,23 @@ impl Vm {
                     // during table insertion. however, since we rely on std's hash table, we don't
                     // think we can run GC in insertion in this implementation.
                     self.stack.pop();
+                }
+                Some(GetGlobal) => {
+                    let key = match self.extract_constant_key(chunk) {
+                        Some(key) => key,
+                        None => {
+                            eprintln!("OP_GET_GLOBAL takes a string constant");
+                            return InterpetResult::CompileError;
+                        }
+                    };
+                    let value = match self.globals.get(&key) {
+                        Some(value) => value,
+                        None => {
+                            eprintln!("undefined variable: {}", key.display());
+                            return InterpetResult::RuntimeError;
+                        }
+                    };
+                    self.stack.push(value.clone());
                 }
                 Some(Pop) => match self.stack.pop() {
                     None => {

@@ -25,6 +25,7 @@ pub enum OpCode {
     Return,
     Print,
     DefineGlobal,
+    GetGlobal,
 }
 
 #[derive(Default)]
@@ -88,6 +89,10 @@ impl Chunk {
             Some(DefineGlobal) => {
                 // SAFETY: constants in this chunk are valid
                 unsafe { trace_constant_code(self, offset, "OP_DEFINE_GLOBAL") }
+            }
+            Some(GetGlobal) => {
+                // SAFETY: constants in this chunk are valid
+                unsafe { trace_constant_code(self, offset, "OP_GET_GLOBAL") }
             }
         }
     }

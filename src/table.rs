@@ -1,4 +1,7 @@
-use std::hash::{Hash, Hasher};
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+};
 
 use crate::object::{RawObject, RawStr};
 
@@ -50,5 +53,10 @@ pub struct Key(RawStr);
 impl Key {
     pub fn new(s: InternedStr) -> Self {
         Self(s.0)
+    }
+
+    pub fn display(&self) -> impl fmt::Display + '_ {
+        // SAFETY: the construction of InternedStr guarantees the validity
+        unsafe { &self.0.as_ref().content }
     }
 }

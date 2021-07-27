@@ -45,6 +45,7 @@ fn main() -> std::io::Result<()> {
     let mut stdin = stdin.lock();
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
+    let mut vm = Vm::new();
 
     loop {
         line.clear();
@@ -54,7 +55,6 @@ fn main() -> std::io::Result<()> {
             break;
         }
 
-        let mut vm = Vm::new();
         let node = syntax::parse(&line);
         eprintln!("{:#?}", node);
         let chunk = match Root::cast(node) {
@@ -76,11 +76,11 @@ fn main() -> std::io::Result<()> {
             chunk.trace_chunk(line.trim());
             vm.run(&chunk);
         }
+    }
 
-        // SAFETY: we don't reuse vm and chunk, so no code can refer to deallocated objects.
-        unsafe {
-            vm.free_all_objects();
-        }
+    // SAFETY: we don't reuse vm and chunk, so no code can refer to deallocated objects.
+    unsafe {
+        vm.free_all_objects();
     }
 
     Ok(())
