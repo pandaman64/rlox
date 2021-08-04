@@ -17,13 +17,13 @@ macro_rules! try_pop {
     ($self:ident, $variant:ident) => {{
         match $self.stack.pop() {
             Some(Value::$variant(v)) => v,
-            _ => return InterpetResult::RuntimeError,
+            _ => return InterpretResult::RuntimeError,
         }
     }};
     ($self:ident) => {{
         match $self.stack.pop() {
             Some(v) => v,
-            _ => return InterpetResult::RuntimeError,
+            _ => return InterpretResult::RuntimeError,
         }
     }};
 }
@@ -34,11 +34,11 @@ macro_rules! check_top {
             Some(Value::$variant(_)) => {}
             None => {
                 eprintln!("Expected {}, got empty stack", stringify!($variant));
-                return InterpetResult::RuntimeError;
+                return InterpretResult::RuntimeError;
             }
             Some(v) => {
                 eprintln!("Expected {}, got {:?}", stringify!($variant), v);
-                return InterpetResult::RuntimeError;
+                return InterpretResult::RuntimeError;
             }
         }
     }};
@@ -54,7 +54,7 @@ macro_rules! binop {
     }};
 }
 
-pub enum InterpetResult {
+pub enum InterpretResult {
     Ok,
     CompileError,
     RuntimeError,
@@ -175,7 +175,7 @@ impl Vm {
     }
 
     // SAFETY: constants in chunk must be valid
-    pub unsafe fn run(&mut self, chunk: &Chunk) -> InterpetResult {
+    pub unsafe fn run(&mut self, chunk: &Chunk) -> InterpretResult {
         use std::collections::hash_map::Entry;
         use OpCode::*;
         use Value::*;
@@ -202,15 +202,15 @@ impl Vm {
             let instruction = chunk.code()[self.ip];
             self.ip += 1;
             match OpCode::from_u8(instruction) {
-                None => return InterpetResult::CompileError,
+                None => return InterpretResult::CompileError,
                 Some(Return) => {
-                    return InterpetResult::Ok;
+                    return InterpretResult::Ok;
                 }
                 Some(Print) => {
                     match self.stack.pop() {
                         None => {
                             eprintln!("no stack");
-                            return InterpetResult::RuntimeError;
+                            return InterpretResult::RuntimeError;
                         }
                         Some(v) => {
                             // SAFETY: v is a valid value
@@ -229,13 +229,13 @@ impl Vm {
                         Some(key) => key,
                         None => {
                             eprintln!("OP_DEFINE_GLOBAL takes a string constant");
-                            return InterpetResult::CompileError;
+                            return InterpretResult::CompileError;
                         }
                     };
                     match self.stack.last() {
                         None => {
                             eprintln!("no stack");
-                            return InterpetResult::RuntimeError;
+                            return InterpretResult::RuntimeError;
                         }
                         Some(value) => {
                             self.globals.insert(key, value.clone());
@@ -251,14 +251,14 @@ impl Vm {
                         Some(key) => key,
                         None => {
                             eprintln!("OP_GET_GLOBAL takes a string constant");
-                            return InterpetResult::CompileError;
+                            return InterpretResult::CompileError;
                         }
                     };
                     let value = match self.globals.get(&key) {
                         Some(value) => value,
                         None => {
                             eprintln!("undefined variable: {}", key.display());
-                            return InterpetResult::RuntimeError;
+                            return InterpretResult::RuntimeError;
                         }
                     };
                     self.stack.push(value.clone());
@@ -268,19 +268,19 @@ impl Vm {
                         Some(key) => key,
                         None => {
                             eprintln!("OP_SET_GLOBAL takes a string constant");
-                            return InterpetResult::CompileError;
+                            return InterpretResult::CompileError;
                         }
                     };
                     // assignments leave the value untouched, so we don't pop here
                     match self.stack.last() {
                         None => {
                             eprintln!("no stack for OP_SET_GLOBAL");
-                            return InterpetResult::RuntimeError;
+                            return InterpretResult::RuntimeError;
                         }
                         Some(value) => match self.globals.entry(key) {
                             Entry::Vacant(v) => {
                                 eprintln!("undefined variable: {}", v.key().display());
-                                return InterpetResult::RuntimeError;
+                                return InterpretResult::RuntimeError;
                             }
                             Entry::Occupied(mut o) => {
                                 o.insert(value.clone());
@@ -299,7 +299,7 @@ impl Vm {
                     match self.stack.last().cloned() {
                         None => {
                             eprintln!("empty stack for OP_SET_LOCAL");
-                            return InterpetResult::RuntimeError;
+                            return InterpretResult::RuntimeError;
                         }
                         Some(v) => {
                             self.stack[local] = v;
@@ -309,7 +309,7 @@ impl Vm {
                 Some(Pop) => match self.stack.pop() {
                     None => {
                         eprintln!("no stack");
-                        return InterpetResult::RuntimeError;
+                        return InterpretResult::RuntimeError;
                     }
                     Some(_) => {}
                 },
@@ -328,7 +328,7 @@ impl Vm {
 
                     if discriminant(&v1) != discriminant(&v2) {
                         eprintln!("type mismatch in equality operation");
-                        return InterpetResult::RuntimeError;
+                        return InterpretResult::RuntimeError;
                     }
                     // SAFETY: v1 and v2 are valid object
                     let eq = unsafe { v1.eq(&v2) };
@@ -348,14 +348,14 @@ impl Vm {
                     }
                     None => {
                         eprintln!("Expected bool or nil, got empty stack");
-                        return InterpetResult::RuntimeError;
+                        return InterpretResult::RuntimeError;
                     }
                 },
                 Some(Add) => {
                     let len = self.stack.len();
                     if len < 2 {
                         eprintln!("insufficient stack");
-                        return InterpetResult::RuntimeError;
+                        return InterpretResult::RuntimeError;
                     }
                     match &self.stack[len - 2..] {
                         [Object(_), Object(_)] => {
@@ -372,7 +372,7 @@ impl Vm {
                                 }
                                 _ => {
                                     eprintln!("type mismatch in addition");
-                                    return InterpetResult::RuntimeError;
+                                    return InterpretResult::RuntimeError;
                                 }
                             }
                         }
@@ -381,7 +381,7 @@ impl Vm {
                         }
                         [_v2, _v1] => {
                             eprintln!("type mismatch in addition");
-                            return InterpetResult::RuntimeError;
+                            return InterpretResult::RuntimeError;
                         }
                         _ => unreachable!(),
                     }
@@ -396,7 +396,7 @@ impl Vm {
                 Some(JumpIfFalse) => match self.stack.last() {
                     None => {
                         eprintln!("no stack for OP_JUMP_IF_FALSE");
-                        return InterpetResult::RuntimeError;
+                        return InterpretResult::RuntimeError;
                     }
                     Some(v) => {
                         if v.is_falsy() {
