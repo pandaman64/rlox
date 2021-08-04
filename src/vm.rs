@@ -402,6 +402,8 @@ impl Vm {
                         if v.is_falsy() {
                             let diff = chunk.read_jump_location(self.ip);
                             self.ip = (self.ip as isize + isize::from(diff)) as usize;
+                        } else {
+                            self.ip += 2;
                         }
                     }
                 },

@@ -141,8 +141,42 @@ impl Compiler {
                         }
                         return;
                     }
-                    BinOpKind::Or => todo!(),
-                    BinOpKind::And => todo!(),
+                    BinOpKind::Or => {
+                        let mut operands = expr.operands();
+                        let lhs = operands.next().unwrap();
+                        let rhs = operands.next().unwrap();
+
+                        self.gen_expr(vm, chunk, lhs);
+
+                        chunk.push_code(OpCode::JumpIfFalse as _, 0);
+                        let rhs_jump = chunk.allocate_jump_location(0);
+
+                        chunk.push_code(OpCode::Jump as _, 0);
+                        let end_jump = chunk.allocate_jump_location(0);
+
+                        chunk.fill_jump_location(rhs_jump);
+                        chunk.push_code(OpCode::Pop as _, 0);
+                        self.gen_expr(vm, chunk, rhs);
+
+                        chunk.fill_jump_location(end_jump);
+                        return;
+                    }
+                    BinOpKind::And => {
+                        let mut operands = expr.operands();
+                        let lhs = operands.next().unwrap();
+                        let rhs = operands.next().unwrap();
+
+                        self.gen_expr(vm, chunk, lhs);
+
+                        chunk.push_code(OpCode::JumpIfFalse as _, 0);
+                        let end_jump = chunk.allocate_jump_location(0);
+
+                        chunk.push_code(OpCode::Pop as _, 0);
+                        self.gen_expr(vm, chunk, rhs);
+
+                        chunk.fill_jump_location(end_jump);
+                        return;
+                    }
                     BinOpKind::Equal => &[OpCode::Equal],
                     BinOpKind::NotEqual => &[OpCode::Equal, OpCode::Not],
                     BinOpKind::Less => &[OpCode::Less],
