@@ -341,11 +341,20 @@ impl Vm {
                     let value = try_pop!(self, Number);
                     self.stack.push(Number(-value));
                 }
-                Some(Not) => {
-                    check_top!(self, Bool);
-                    let value = try_pop!(self, Bool);
-                    self.stack.push(Bool(!value))
-                }
+                Some(Not) => match self.stack.last() {
+                    Some(Value::Nil | Value::Bool(false)) => {
+                        self.stack.pop();
+                        self.stack.push(Bool(true));
+                    }
+                    Some(_) => {
+                        self.stack.pop();
+                        self.stack.push(Bool(false));
+                    }
+                    None => {
+                        eprintln!("Expected bool or nil, got empty stack");
+                        return InterpetResult::RuntimeError;
+                    }
+                },
                 Some(Add) => {
                     let len = self.stack.len();
                     if len < 2 {
