@@ -228,18 +228,21 @@ impl Compiler {
 
                 chunk.push_code(OpCode::JumpIfFalse as _, 0);
                 let else_jump = chunk.allocate_jump_location(0);
-                chunk.push_code(OpCode::Pop as _, 0);
 
+                chunk.push_code(OpCode::Pop as _, 0);
                 self.gen_stmt(vm, chunk, then_branch);
 
-                chunk.fill_jump_location(else_jump);
                 if let Some(else_branch) = else_branch {
-                    // chunk.fill_jump_location(else_jump);
-                    // chunk.push_code(OpCode::Jump as _, 0);
-                    // after_if.push(chunk.allocate_jump_location());
-                    // self.gen_stmt(vm, chunk, else_stmt);
-                    todo!()
+                    chunk.push_code(OpCode::Jump as _, 0);
+                    let end_jump = chunk.allocate_jump_location(0);
+
+                    chunk.fill_jump_location(else_jump);
+                    chunk.push_code(OpCode::Pop as _, 0);
+                    self.gen_stmt(vm, chunk, else_branch);
+
+                    chunk.fill_jump_location(end_jump);
                 } else {
+                    chunk.fill_jump_location(else_jump);
                     chunk.push_code(OpCode::Pop as _, 0);
                 }
             }
