@@ -3,12 +3,10 @@ use rowan::NodeOrToken;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 fn first_nontirivial_token(node: &SyntaxNode) -> Option<SyntaxToken> {
-    node.children_with_tokens()
-        .filter_map(|child| match child {
-            NodeOrToken::Token(token) if !token.kind().is_trivial() => Some(token),
-            _ => None,
-        })
-        .next()
+    node.children_with_tokens().find_map(|child| match child {
+        NodeOrToken::Token(token) if !token.kind().is_trivial() => Some(token),
+        _ => None,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -276,15 +274,14 @@ impl VarDecl {
     pub fn ident(&self) -> Option<Identifier> {
         self.inner
             .children_with_tokens()
-            .filter_map(|child| match child {
+            .find_map(|child| match child {
                 NodeOrToken::Token(token) => Identifier::cast(token),
                 _ => None,
             })
-            .next()
     }
 
     pub fn expr(&self) -> Option<Expr> {
-        self.inner.children().filter_map(Expr::cast).next()
+        self.inner.children().find_map(Expr::cast)
     }
 }
 
@@ -303,7 +300,7 @@ impl ExprStmt {
     }
 
     pub fn expr(&self) -> Option<Expr> {
-        self.inner.children().filter_map(Expr::cast).next()
+        self.inner.children().find_map(Expr::cast)
     }
 }
 
@@ -322,7 +319,7 @@ impl PrintStmt {
     }
 
     pub fn expr(&self) -> Option<Expr> {
-        self.inner.children().filter_map(Expr::cast).next()
+        self.inner.children().find_map(Expr::cast)
     }
 }
 
