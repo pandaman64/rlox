@@ -327,9 +327,29 @@ impl PrintStmt {
 }
 
 #[derive(Debug)]
+pub struct BlockStmt {
+    inner: SyntaxNode,
+}
+
+impl BlockStmt {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::BlockStmtNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn decls(&self) -> impl Iterator<Item = Decl> {
+        self.inner.children().filter_map(Decl::cast)
+    }
+}
+
+#[derive(Debug)]
 pub enum Stmt {
     ExprStmt(ExprStmt),
     PrintStmt(PrintStmt),
+    BlockStmt(BlockStmt),
 }
 
 impl Stmt {
@@ -341,6 +361,7 @@ impl Stmt {
             Some(match child.kind() {
                 ExprStmtNode => Self::ExprStmt(ExprStmt::cast(child)?),
                 PrintStmtNode => Self::PrintStmt(PrintStmt::cast(child)?),
+                BlockStmtNode => Self::BlockStmt(BlockStmt::cast(child)?),
                 _ => return None,
             })
         } else {

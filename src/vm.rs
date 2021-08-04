@@ -288,6 +288,24 @@ impl Vm {
                         },
                     }
                 }
+                Some(GetLocal) => {
+                    let local = usize::from(chunk.code()[self.ip]);
+                    self.ip += 1;
+                    self.stack.push(self.stack[local].clone());
+                }
+                Some(SetLocal) => {
+                    let local = usize::from(chunk.code()[self.ip]);
+                    self.ip += 1;
+                    match self.stack.last().cloned() {
+                        None => {
+                            eprintln!("empty stack for OP_SET_LOCAL");
+                            return InterpetResult::RuntimeError;
+                        }
+                        Some(v) => {
+                            self.stack[local] = v;
+                        }
+                    }
+                }
                 Some(Pop) => match self.stack.pop() {
                     None => {
                         eprintln!("no stack");

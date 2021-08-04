@@ -21,6 +21,7 @@ use vm::Vm;
 
 use crate::{
     ast::Root,
+    codegen::Compiler,
     opcode::{Chunk, OpCode},
 };
 
@@ -46,6 +47,7 @@ fn main() -> std::io::Result<()> {
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
     let mut vm = Vm::new();
+    let mut compiler = Compiler::new();
 
     loop {
         line.clear();
@@ -65,7 +67,7 @@ fn main() -> std::io::Result<()> {
             Some(root) => {
                 let mut chunk = Chunk::default();
                 for decl in root.decls() {
-                    codegen::gen_decl(&mut vm, &mut chunk, decl);
+                    compiler.gen_decl(&mut vm, &mut chunk, decl);
                 }
                 chunk.push_code(OpCode::Return as _, 0);
                 chunk

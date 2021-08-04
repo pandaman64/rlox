@@ -27,6 +27,8 @@ pub enum OpCode {
     DefineGlobal,
     GetGlobal,
     SetGlobal,
+    GetLocal,
+    SetLocal,
 }
 
 #[derive(Default)]
@@ -48,6 +50,12 @@ unsafe fn trace_constant_code(chunk: &Chunk, offset: usize, s: &str) -> usize {
     eprintln!("{:-16} {:4} '{}'", s, constant_index, unsafe {
         chunk.constants[constant_index].format_args()
     });
+    offset + 2
+}
+
+fn trace_byte_code(chunk: &Chunk, offset: usize, s: &str) -> usize {
+    let constant_index = usize::from(chunk.code[offset + 1]);
+    eprintln!("{:-16} {:4}", s, constant_index);
     offset + 2
 }
 
@@ -99,6 +107,8 @@ impl Chunk {
                 // SAFETY: constants in this chunk are valid
                 unsafe { trace_constant_code(self, offset, "OP_SET_GLOBAL") }
             }
+            Some(GetLocal) => trace_byte_code(self, offset, "OP_GET_LOCAL"),
+            Some(SetLocal) => trace_byte_code(self, offset, "OP_SET_LOCAL"),
         }
     }
 

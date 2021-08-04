@@ -173,6 +173,18 @@ where
                         self.expect(SemicolonToken);
                         self.builder.finish_node();
                     }
+                    BraceOpenToken => {
+                        self.builder.start_node(BlockStmtNode.into());
+                        self.bump();
+                        while let Some(next) = self.peek() {
+                            if next == BraceCloseToken {
+                                break;
+                            }
+                            self.parse_decl();
+                        }
+                        self.expect(BraceCloseToken);
+                        self.builder.finish_node();
+                    }
                     // expression statements
                     _ => {
                         self.builder.start_node(ExprStmtNode.into());
