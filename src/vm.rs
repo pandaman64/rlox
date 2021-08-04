@@ -344,7 +344,8 @@ impl Vm {
                 Some(Not) => match self.stack.last() {
                     Some(v) => {
                         let falsy = v.is_falsy();
-                        self.stack.push(Bool(falsy));
+                        let last = self.stack.len();
+                        self.stack[last - 1] = Bool(falsy);
                     }
                     None => {
                         eprintln!("Expected bool or nil, got empty stack");
