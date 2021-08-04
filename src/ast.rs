@@ -366,11 +366,35 @@ impl IfStmt {
 }
 
 #[derive(Debug)]
+pub struct WhileStmt {
+    inner: SyntaxNode,
+}
+
+impl WhileStmt {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::WhileStmtNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn cond(&self) -> Option<Expr> {
+        self.inner.children().find_map(Expr::cast)
+    }
+
+    pub fn body(&self) -> Option<Stmt> {
+        self.inner.children().find_map(Stmt::cast)
+    }
+}
+
+#[derive(Debug)]
 pub enum Stmt {
     ExprStmt(ExprStmt),
     PrintStmt(PrintStmt),
     BlockStmt(BlockStmt),
     IfStmt(IfStmt),
+    WhileStmt(WhileStmt),
 }
 
 impl Stmt {
@@ -384,6 +408,7 @@ impl Stmt {
                 PrintStmtNode => Self::PrintStmt(PrintStmt::cast(child)?),
                 BlockStmtNode => Self::BlockStmt(BlockStmt::cast(child)?),
                 IfStmtNode => Self::IfStmt(IfStmt::cast(child)?),
+                WhileStmtNode => Self::WhileStmt(WhileStmt::cast(child)?),
                 _ => return None,
             })
         } else {

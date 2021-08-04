@@ -198,6 +198,15 @@ where
                         }
                         self.builder.finish_node();
                     }
+                    WhileToken => {
+                        self.builder.start_node(WhileStmtNode.into());
+                        self.bump();
+                        self.expect(ParenOpenToken);
+                        self.parse_expr(BindingPower::Zero);
+                        self.expect(ParenCloseToken);
+                        self.parse_stmt();
+                        self.builder.finish_node();
+                    }
                     // expression statements
                     _ => {
                         self.builder.start_node(ExprStmtNode.into());

@@ -169,14 +169,23 @@ impl Chunk {
         ret
     }
 
-    pub fn fill_jump_location(&mut self, jump: usize) {
-        assert!(jump < self.code.len());
-        let diff = u16::try_from(self.code.len() - jump).expect("too much code to jump over");
-        let low = u8::try_from(diff & 0xFF).unwrap();
-        let high = u8::try_from(diff >> 8).unwrap();
+    pub fn fill_jump_location(&mut self, jump: usize, ip: usize) {
+        let diff = if ip >= jump {
+            i16::try_from(ip - jump).expect("too much code to jump over")
+        } else {
+            // technically, this formula does not take into account the case where `jump + i16::MIN == ip`.
+            // but it's ok for this toy vm
+            -i16::try_from(jump - ip).expect("too much code to jump over")
+        };
+        let bytes = diff.to_le_bytes();
 
-        self.code[jump] = low;
-        self.code[jump + 1] = high;
+        self.code[jump] = bytes[0];
+        self.code[jump + 1] = bytes[1];
+    }
+
+    pub fn fill_jump_location_with_current(&mut self, jump: usize) {
+        assert!(jump < self.code.len());
+        self.fill_jump_location(jump, self.code.len());
     }
 
     pub fn read_jump_location(&self, offset: usize) -> i16 {

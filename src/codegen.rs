@@ -125,7 +125,7 @@ impl Compiler {
                             match self.resolve_local(ident.to_str()) {
                                 Some(i) => {
                                     self.gen_expr(vm, chunk, rhs);
-                                    chunk.push_code(OpCode::SetGlobal as _, 0);
+                                    chunk.push_code(OpCode::SetLocal as _, 0);
                                     chunk.push_code(i as _, 0);
                                 }
                                 None => {
@@ -154,11 +154,11 @@ impl Compiler {
                         chunk.push_code(OpCode::Jump as _, 0);
                         let end_jump = chunk.allocate_jump_location(0);
 
-                        chunk.fill_jump_location(rhs_jump);
+                        chunk.fill_jump_location_with_current(rhs_jump);
                         chunk.push_code(OpCode::Pop as _, 0);
                         self.gen_expr(vm, chunk, rhs);
 
-                        chunk.fill_jump_location(end_jump);
+                        chunk.fill_jump_location_with_current(end_jump);
                         return;
                     }
                     BinOpKind::And => {
@@ -174,7 +174,7 @@ impl Compiler {
                         chunk.push_code(OpCode::Pop as _, 0);
                         self.gen_expr(vm, chunk, rhs);
 
-                        chunk.fill_jump_location(end_jump);
+                        chunk.fill_jump_location_with_current(end_jump);
                         return;
                     }
                     BinOpKind::Equal => &[OpCode::Equal],
@@ -270,15 +270,36 @@ impl Compiler {
                     chunk.push_code(OpCode::Jump as _, 0);
                     let end_jump = chunk.allocate_jump_location(0);
 
-                    chunk.fill_jump_location(else_jump);
+                    chunk.fill_jump_location_with_current(else_jump);
                     chunk.push_code(OpCode::Pop as _, 0);
                     self.gen_stmt(vm, chunk, else_branch);
 
-                    chunk.fill_jump_location(end_jump);
+                    chunk.fill_jump_location_with_current(end_jump);
                 } else {
-                    chunk.fill_jump_location(else_jump);
+                    chunk.fill_jump_location_with_current(else_jump);
                     chunk.push_code(OpCode::Pop as _, 0);
                 }
+            }
+            Stmt::WhileStmt(stmt) => {
+                let cond = stmt.cond().unwrap();
+                let body = stmt.body().unwrap();
+
+                let start_loop_ip = chunk.code().len();
+
+                self.gen_expr(vm, chunk, cond);
+
+                chunk.push_code(OpCode::JumpIfFalse as _, 0);
+                let end_jump = chunk.allocate_jump_location(0);
+
+                chunk.push_code(OpCode::Pop as _, 0);
+                self.gen_stmt(vm, chunk, body);
+
+                chunk.push_code(OpCode::Jump as _, 0);
+                let start_jump = chunk.allocate_jump_location(0);
+                chunk.fill_jump_location(start_jump, start_loop_ip);
+
+                chunk.fill_jump_location_with_current(end_jump);
+                chunk.push_code(OpCode::Pop as _, 0);
             }
         }
     }
