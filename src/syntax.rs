@@ -109,8 +109,11 @@ pub enum SyntaxKind {
     VarDeclNode,
     DeclNode,
 
-    // statements,
+    // statements
     ExprStmtNode,
+    ForInitNode,
+    ForCondNode,
+    ForIncrNode,
     ForStmtNode,
     IfStmtNode,
     PrintStmtNode,

@@ -207,6 +207,48 @@ where
                         self.parse_stmt();
                         self.builder.finish_node();
                     }
+                    ForToken => {
+                        self.builder.start_node(ForStmtNode.into());
+                        self.bump();
+                        self.expect(ParenOpenToken);
+
+                        self.builder.start_node(ForInitNode.into());
+                        match self.peek() {
+                            // no initializer
+                            Some(SemicolonToken) => self.expect(SemicolonToken),
+                            // variable declaration
+                            Some(VarToken) => self.parse_decl(),
+                            // expression
+                            _ => {
+                                self.parse_expr(BindingPower::Zero);
+                                self.expect(SemicolonToken);
+                            }
+                        }
+                        self.builder.finish_node();
+
+                        // condition
+                        self.builder.start_node(ForCondNode.into());
+                        match self.peek() {
+                            // no condition
+                            Some(SemicolonToken) => {}
+                            _ => self.parse_expr(BindingPower::Zero),
+                        }
+                        self.builder.finish_node();
+                        self.expect(SemicolonToken);
+
+                        // increment
+                        self.builder.start_node(ForIncrNode.into());
+                        match self.peek() {
+                            Some(ParenCloseToken) => {}
+                            _ => self.parse_expr(BindingPower::Zero),
+                        }
+                        self.builder.finish_node();
+                        self.expect(ParenCloseToken);
+
+                        self.parse_stmt();
+
+                        self.builder.finish_node();
+                    }
                     // expression statements
                     _ => {
                         self.builder.start_node(ExprStmtNode.into());

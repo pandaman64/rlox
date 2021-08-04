@@ -1,5 +1,5 @@
 use crate::{
-    ast::{BinOpKind, Decl, Expr, Identifier, Primary, Stmt, UnaryOpKind},
+    ast::{BinOpKind, Decl, Expr, ForInit, Identifier, Primary, Stmt, UnaryOpKind, VarDecl},
     opcode::{Chunk, OpCode},
     value::Value,
     vm::Vm,
@@ -301,35 +301,77 @@ impl Compiler {
                 chunk.fill_jump_location_with_current(end_jump);
                 chunk.push_code(OpCode::Pop as _, 0);
             }
+            Stmt::ForStmt(stmt) => {
+                self.begin_block();
+
+                match stmt.init() {
+                    Some(ForInit::Expr(expr)) => {
+                        self.gen_expr(vm, chunk, expr);
+                        chunk.push_code(OpCode::Pop as _, 0);
+                    }
+                    Some(ForInit::VarDecl(decl)) => self.gen_var_decl(vm, chunk, decl),
+                    _ => {}
+                }
+
+                let start_loop_ip = chunk.code().len();
+
+                let end_jump = stmt.cond().map(|cond| {
+                    self.gen_expr(vm, chunk, cond.expr().unwrap());
+                    chunk.push_code(OpCode::JumpIfFalse as _, 0);
+                    let end_jump = chunk.allocate_jump_location(0);
+                    chunk.push_code(OpCode::Pop as _, 0);
+                    end_jump
+                });
+
+                self.gen_stmt(vm, chunk, stmt.body().unwrap());
+
+                if let Some(incr) = stmt.incr() {
+                    self.gen_expr(vm, chunk, incr.expr().unwrap());
+                    chunk.push_code(OpCode::Pop as _, 0);
+                }
+
+                chunk.push_code(OpCode::Jump as _, 0);
+                let start_jump = chunk.allocate_jump_location(0);
+                chunk.fill_jump_location(start_jump, start_loop_ip);
+
+                if let Some(end_jump) = end_jump {
+                    chunk.fill_jump_location_with_current(end_jump);
+                }
+                chunk.push_code(OpCode::Pop as _, 0);
+
+                self.end_block(chunk);
+            }
+        }
+    }
+
+    fn gen_var_decl(&mut self, vm: &mut Vm, chunk: &mut Chunk, decl: VarDecl) {
+        if self.block_depth > GLOBAL_BLOCK {
+            let ident = decl.ident().unwrap();
+            let ident = ident.to_str();
+            self.push_local(ident);
+
+            match decl.expr() {
+                Some(expr) => self.gen_expr(vm, chunk, expr),
+                None => chunk.push_code(OpCode::Nil as _, 0),
+            }
+
+            self.locals.last_mut().unwrap().depth = self.block_depth;
+        } else {
+            let ident = vm.allocate_string(decl.ident().unwrap().to_str().into());
+            let index = chunk.push_constant(Value::Object(ident.into_raw_obj()));
+
+            match decl.expr() {
+                Some(expr) => self.gen_expr(vm, chunk, expr),
+                None => chunk.push_code(OpCode::Nil as _, 0),
+            }
+            chunk.push_code(OpCode::DefineGlobal as _, 0);
+            chunk.push_code(index, 0);
         }
     }
 
     pub fn gen_decl(&mut self, vm: &mut Vm, chunk: &mut Chunk, decl: Decl) {
         match decl {
-            Decl::VarDecl(decl) => {
-                if self.block_depth > GLOBAL_BLOCK {
-                    let ident = decl.ident().unwrap();
-                    let ident = ident.to_str();
-                    self.push_local(ident);
-
-                    match decl.expr() {
-                        Some(expr) => self.gen_expr(vm, chunk, expr),
-                        None => chunk.push_code(OpCode::Nil as _, 0),
-                    }
-
-                    self.locals.last_mut().unwrap().depth = self.block_depth;
-                } else {
-                    let ident = vm.allocate_string(decl.ident().unwrap().to_str().into());
-                    let index = chunk.push_constant(Value::Object(ident.into_raw_obj()));
-
-                    match decl.expr() {
-                        Some(expr) => self.gen_expr(vm, chunk, expr),
-                        None => chunk.push_code(OpCode::Nil as _, 0),
-                    }
-                    chunk.push_code(OpCode::DefineGlobal as _, 0);
-                    chunk.push_code(index, 0);
-                }
-            }
+            Decl::VarDecl(decl) => self.gen_var_decl(vm, chunk, decl),
             Decl::Stmt(stmt) => self.gen_stmt(vm, chunk, stmt),
         }
     }

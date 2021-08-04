@@ -389,12 +389,108 @@ impl WhileStmt {
 }
 
 #[derive(Debug)]
+pub enum ForInit {
+    VarDecl(VarDecl),
+    Expr(Expr),
+}
+
+impl ForInit {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        use SyntaxKind::*;
+
+        if inner.kind() == SyntaxKind::ForInitNode {
+            let child = inner.first_child()?;
+            Some(match child.kind() {
+                DeclNode => Self::VarDecl(match Decl::cast(child)? {
+                    Decl::VarDecl(decl) => decl,
+                    _ => return None,
+                }),
+                ExprNode => Self::Expr(Expr::cast(child)?),
+                _ => return None,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ForCond {
+    inner: SyntaxNode,
+}
+
+impl ForCond {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::ForCondNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn expr(&self) -> Option<Expr> {
+        self.inner.children().find_map(Expr::cast)
+    }
+}
+
+#[derive(Debug)]
+pub struct ForIncr {
+    inner: SyntaxNode,
+}
+
+impl ForIncr {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::ForIncrNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn expr(&self) -> Option<Expr> {
+        self.inner.children().find_map(Expr::cast)
+    }
+}
+
+#[derive(Debug)]
+pub struct ForStmt {
+    inner: SyntaxNode,
+}
+
+impl ForStmt {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::ForStmtNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn init(&self) -> Option<ForInit> {
+        self.inner.children().find_map(ForInit::cast)
+    }
+
+    pub fn cond(&self) -> Option<ForCond> {
+        self.inner.children().find_map(ForCond::cast)
+    }
+
+    pub fn incr(&self) -> Option<ForIncr> {
+        self.inner.children().find_map(ForIncr::cast)
+    }
+
+    pub fn body(&self) -> Option<Stmt> {
+        self.inner.children().find_map(Stmt::cast)
+    }
+}
+
+#[derive(Debug)]
 pub enum Stmt {
     ExprStmt(ExprStmt),
     PrintStmt(PrintStmt),
     BlockStmt(BlockStmt),
     IfStmt(IfStmt),
     WhileStmt(WhileStmt),
+    ForStmt(ForStmt),
 }
 
 impl Stmt {
@@ -409,6 +505,7 @@ impl Stmt {
                 BlockStmtNode => Self::BlockStmt(BlockStmt::cast(child)?),
                 IfStmtNode => Self::IfStmt(IfStmt::cast(child)?),
                 WhileStmtNode => Self::WhileStmt(WhileStmt::cast(child)?),
+                ForStmtNode => Self::ForStmt(ForStmt::cast(child)?),
                 _ => return None,
             })
         } else {
