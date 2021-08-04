@@ -218,6 +218,31 @@ impl Compiler {
                 }
                 self.end_block(chunk);
             }
+            Stmt::IfStmt(stmt) => {
+                let cond = stmt.cond().unwrap();
+                let mut branches = stmt.branches();
+                let then_branch = branches.next().unwrap();
+                let else_branch = branches.next();
+
+                self.gen_expr(vm, chunk, cond);
+
+                chunk.push_code(OpCode::JumpIfFalse as _, 0);
+                let else_jump = chunk.allocate_jump_location(0);
+                chunk.push_code(OpCode::Pop as _, 0);
+
+                self.gen_stmt(vm, chunk, then_branch);
+
+                chunk.fill_jump_location(else_jump);
+                if let Some(else_branch) = else_branch {
+                    // chunk.fill_jump_location(else_jump);
+                    // chunk.push_code(OpCode::Jump as _, 0);
+                    // after_if.push(chunk.allocate_jump_location());
+                    // self.gen_stmt(vm, chunk, else_stmt);
+                    todo!()
+                } else {
+                    chunk.push_code(OpCode::Pop as _, 0);
+                }
+            }
         }
     }
 

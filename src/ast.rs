@@ -343,10 +343,34 @@ impl BlockStmt {
 }
 
 #[derive(Debug)]
+pub struct IfStmt {
+    inner: SyntaxNode,
+}
+
+impl IfStmt {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::IfStmtNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn cond(&self) -> Option<Expr> {
+        self.inner.children().find_map(Expr::cast)
+    }
+
+    pub fn branches(&self) -> impl Iterator<Item = Stmt> {
+        self.inner.children().filter_map(Stmt::cast)
+    }
+}
+
+#[derive(Debug)]
 pub enum Stmt {
     ExprStmt(ExprStmt),
     PrintStmt(PrintStmt),
     BlockStmt(BlockStmt),
+    IfStmt(IfStmt),
 }
 
 impl Stmt {
@@ -359,6 +383,7 @@ impl Stmt {
                 ExprStmtNode => Self::ExprStmt(ExprStmt::cast(child)?),
                 PrintStmtNode => Self::PrintStmt(PrintStmt::cast(child)?),
                 BlockStmtNode => Self::BlockStmt(BlockStmt::cast(child)?),
+                IfStmtNode => Self::IfStmt(IfStmt::cast(child)?),
                 _ => return None,
             })
         } else {

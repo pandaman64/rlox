@@ -29,6 +29,8 @@ pub enum OpCode {
     SetGlobal,
     GetLocal,
     SetLocal,
+    Jump,
+    JumpIfFalse,
 }
 
 #[derive(Default)]
@@ -54,9 +56,20 @@ unsafe fn trace_constant_code(chunk: &Chunk, offset: usize, s: &str) -> usize {
 }
 
 fn trace_byte_code(chunk: &Chunk, offset: usize, s: &str) -> usize {
-    let constant_index = usize::from(chunk.code[offset + 1]);
-    eprintln!("{:-16} {:4}", s, constant_index);
+    let byte = chunk.code[offset + 1];
+    eprintln!("{:-16} {:4}", s, byte);
     offset + 2
+}
+
+fn trace_jump_code(chunk: &Chunk, offset: usize, s: &str) -> usize {
+    let diff = chunk.read_jump_location(offset + 1);
+    eprintln!(
+        "{:-16} {:4} -> {}",
+        s,
+        offset,
+        offset as isize + 1 + isize::from(diff)
+    );
+    offset + 3
 }
 
 impl Chunk {
@@ -109,6 +122,8 @@ impl Chunk {
             }
             Some(GetLocal) => trace_byte_code(self, offset, "OP_GET_LOCAL"),
             Some(SetLocal) => trace_byte_code(self, offset, "OP_SET_LOCAL"),
+            Some(Jump) => trace_jump_code(self, offset, "OP_JUMP"),
+            Some(JumpIfFalse) => trace_jump_code(self, offset, "OP_JUMP_IF_FALSE"),
         }
     }
 
@@ -143,5 +158,28 @@ impl Chunk {
         let index = self.constants.len();
         self.constants.push(value);
         u8::try_from(index).unwrap()
+    }
+
+    pub fn allocate_jump_location(&mut self, line: usize) -> usize {
+        let ret = self.code.len();
+        self.code.push(u8::MAX);
+        self.code.push(u8::MAX);
+        self.line.push(line);
+        self.line.push(line);
+        ret
+    }
+
+    pub fn fill_jump_location(&mut self, jump: usize) {
+        assert!(jump < self.code.len());
+        let diff = u16::try_from(self.code.len() - jump).expect("too much code to jump over");
+        let low = u8::try_from(diff & 0xFF).unwrap();
+        let high = u8::try_from(diff >> 8).unwrap();
+
+        self.code[jump] = low;
+        self.code[jump + 1] = high;
+    }
+
+    pub fn read_jump_location(&self, offset: usize) -> i16 {
+        i16::from_le_bytes([self.code[offset], self.code[offset + 1]])
     }
 }

@@ -342,13 +342,9 @@ impl Vm {
                     self.stack.push(Number(-value));
                 }
                 Some(Not) => match self.stack.last() {
-                    Some(Value::Nil | Value::Bool(false)) => {
-                        self.stack.pop();
-                        self.stack.push(Bool(true));
-                    }
-                    Some(_) => {
-                        self.stack.pop();
-                        self.stack.push(Bool(false));
+                    Some(v) => {
+                        let falsy = v.is_falsy();
+                        self.stack.push(Bool(falsy));
                     }
                     None => {
                         eprintln!("Expected bool or nil, got empty stack");
@@ -393,6 +389,22 @@ impl Vm {
                 Some(Subtract) => binop!(self, Number, -, Number),
                 Some(Multiply) => binop!(self, Number, *, Number),
                 Some(Divide) => binop!(self, Number, /, Number),
+                Some(Jump) => {
+                    let diff = chunk.read_jump_location(self.ip);
+                    self.ip = (self.ip as isize + isize::from(diff)) as usize;
+                }
+                Some(JumpIfFalse) => match self.stack.last() {
+                    None => {
+                        eprintln!("no stack for OP_JUMP_IF_FALSE");
+                        return InterpetResult::RuntimeError;
+                    }
+                    Some(v) => {
+                        if v.is_falsy() {
+                            let diff = chunk.read_jump_location(self.ip);
+                            self.ip = (self.ip as isize + isize::from(diff)) as usize;
+                        }
+                    }
+                },
             }
         }
     }

@@ -185,6 +185,19 @@ where
                         self.expect(BraceCloseToken);
                         self.builder.finish_node();
                     }
+                    IfToken => {
+                        self.builder.start_node(IfStmtNode.into());
+                        self.bump();
+                        self.expect(ParenOpenToken);
+                        self.parse_expr(BindingPower::Zero);
+                        self.expect(ParenCloseToken);
+                        self.parse_stmt();
+                        if matches!(self.peek(), Some(ElseToken)) {
+                            self.bump();
+                            self.parse_stmt();
+                        }
+                        self.builder.finish_node();
+                    }
                     // expression statements
                     _ => {
                         self.builder.start_node(ExprStmtNode.into());

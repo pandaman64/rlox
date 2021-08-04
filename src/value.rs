@@ -67,4 +67,13 @@ impl Value {
             _ => false,
         }
     }
+
+    pub fn is_falsy(&self) -> bool {
+        use Value::*;
+
+        match self {
+            Nil | Bool(false) => true,
+            _ => true,
+        }
+    }
 }
