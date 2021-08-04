@@ -58,7 +58,9 @@ fn main() -> std::io::Result<()> {
         }
 
         let node = syntax::parse(&line);
-        eprintln!("{:#?}", node);
+        if trace_available() {
+            eprintln!("{:#?}", node);
+        }
         let chunk = match Root::cast(node) {
             None => {
                 eprintln!("syntax error");
