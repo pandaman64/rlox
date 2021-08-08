@@ -201,13 +201,24 @@ where
         match self.peek() {
             None => {}
             Some(token) => {
-                self.builder.start_node(SyntaxKind::StmtNode.into());
+                self.builder.start_node(StmtNode.into());
                 match token {
                     PrintToken => {
                         self.builder.start_node(PrintStmtNode.into());
                         self.bump();
                         self.parse_expr(BindingPower::Zero);
                         self.expect(SemicolonToken);
+                        self.builder.finish_node();
+                    }
+                    ReturnToken => {
+                        self.builder.start_node(ReturnStmtNode.into());
+                        self.bump();
+                        if matches!(self.peek(), Some(SemicolonToken)) {
+                            self.bump();
+                        } else {
+                            self.parse_expr(BindingPower::Zero);
+                            self.expect(SemicolonToken);
+                        }
                         self.builder.finish_node();
                     }
                     BraceOpenToken => self.parse_block_stmt(),

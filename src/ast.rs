@@ -396,6 +396,25 @@ impl PrintStmt {
 }
 
 #[derive(Debug)]
+pub struct ReturnStmt {
+    inner: SyntaxNode,
+}
+
+impl ReturnStmt {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::ReturnStmtNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn expr(&self) -> Option<Expr> {
+        self.inner.children().find_map(Expr::cast)
+    }
+}
+
+#[derive(Debug)]
 pub struct BlockStmt {
     inner: SyntaxNode,
 }
@@ -559,6 +578,7 @@ impl ForStmt {
 pub enum Stmt {
     ExprStmt(ExprStmt),
     PrintStmt(PrintStmt),
+    ReturnStmt(ReturnStmt),
     BlockStmt(BlockStmt),
     IfStmt(IfStmt),
     WhileStmt(WhileStmt),
@@ -574,6 +594,7 @@ impl Stmt {
             Some(match child.kind() {
                 ExprStmtNode => Self::ExprStmt(ExprStmt::cast(child)?),
                 PrintStmtNode => Self::PrintStmt(PrintStmt::cast(child)?),
+                ReturnStmtNode => Self::ReturnStmt(ReturnStmt::cast(child)?),
                 BlockStmtNode => Self::BlockStmt(BlockStmt::cast(child)?),
                 IfStmtNode => Self::IfStmt(IfStmt::cast(child)?),
                 WhileStmtNode => Self::WhileStmt(WhileStmt::cast(child)?),

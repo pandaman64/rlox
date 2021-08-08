@@ -32,19 +32,23 @@ pub struct Compiler<'parent> {
     block_depth: usize,
 }
 
+fn new_locals() -> Vec<Local> {
+    vec![
+        // This corresponds to the callee, and local variables starts with index 1
+        Local {
+            ident: "<callee>".into(),
+            depth: 0,
+        },
+    ]
+}
+
 impl<'parent> Compiler<'parent> {
     pub fn new_script() -> Self {
         Self {
             parent: None,
             function: Function::new_script(),
             kind: FunctionKind::Script,
-            locals: vec![
-                // This corresponds to the caller of the top-level script
-                Local {
-                    ident: "<top-level script>".into(),
-                    depth: 0,
-                },
-            ],
+            locals: new_locals(),
             block_depth: 0,
         }
     }
@@ -54,7 +58,7 @@ impl<'parent> Compiler<'parent> {
             parent: Some(parent),
             function: Function::new_function(name, arity),
             kind: FunctionKind::Function,
-            locals: vec![],
+            locals: new_locals(),
             block_depth: 0,
         }
     }
@@ -76,7 +80,7 @@ impl<'parent> Compiler<'parent> {
             }
 
             if local.ident == ident {
-                panic!("shadowing in the same scope is not supported: {}", ident);
+                todo!("shadowing in the same scope is not supported: {}", ident);
             }
         }
 
@@ -321,6 +325,16 @@ impl<'parent> Compiler<'parent> {
                 self.gen_expr(vm, stmt.expr().unwrap());
                 self.chunk_mut().push_code(OpCode::Print as _, 0);
             }
+            Stmt::ReturnStmt(stmt) => match self.kind {
+                FunctionKind::Script => todo!("cannot return from top-level script"),
+                FunctionKind::Function => {
+                    match stmt.expr() {
+                        Some(expr) => self.gen_expr(vm, expr),
+                        None => self.chunk_mut().push_code(OpCode::Nil as _, 0),
+                    }
+                    self.chunk_mut().push_code(OpCode::Return as _, 0);
+                }
+            },
             Stmt::BlockStmt(stmt) => self.gen_block_stmt(vm, stmt),
             Stmt::IfStmt(stmt) => {
                 let cond = stmt.cond().unwrap();
