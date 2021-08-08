@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    object::{self, ObjectKind, ObjectRef, RawObject, RawStr},
+    object::{self, Function, ObjectKind, ObjectRef, RawObject, RawStr},
     opcode::{Chunk, OpCode},
     table::{InternedStr, Key},
     trace_available,
@@ -54,6 +54,14 @@ macro_rules! binop {
     }};
 }
 
+struct CallFrame {
+    function: RawObject,
+    // the ip to which we jump after executing this function
+    ip: usize,
+    // the base pointer from which the local variables of this function start
+    bp: usize,
+}
+
 pub enum InterpretResult {
     Ok,
     CompileError,
@@ -63,6 +71,7 @@ pub enum InterpretResult {
 pub struct Vm {
     ip: usize,
     stack: Vec<Value>,
+    frames: Vec<CallFrame>,
     objects: Option<RawObject>,
     strings: HashSet<InternedStr>,
     globals: HashMap<Key, Value>,
@@ -73,6 +82,7 @@ impl Vm {
         Self {
             ip: 0,
             stack: vec![],
+            frames: vec![],
             objects: None,
             strings: HashSet::new(),
             globals: HashMap::new(),
@@ -179,16 +189,45 @@ impl Vm {
         }
     }
 
-    // SAFETY: constants in chunk must be valid
-    pub unsafe fn run(&mut self, chunk: &Chunk) -> InterpretResult {
+    // SAFETY: function must be valid
+    pub unsafe fn run(&mut self, function: Function) -> InterpretResult {
         use std::collections::hash_map::Entry;
         use OpCode::*;
         use Value::*;
 
         self.ip = 0;
         self.stack = vec![];
+        let function = {
+            let obj_ptr = Box::into_raw(Box::new(function));
+            RawObject::new(obj_ptr as _).unwrap()
+        };
+        unsafe {
+            self.add_object_head(function);
+        }
+        self.frames = vec![CallFrame {
+            function,
+            ip: usize::MAX,
+            bp: 0,
+        }];
 
         loop {
+            let frame = match self.frames.last() {
+                Some(frame) => frame,
+                None => {
+                    eprintln!("no call frame to execute");
+                    return InterpretResult::RuntimeError;
+                }
+            };
+            // SAFETY: given function is valid and we push to the call frame only valid functions
+            let function = match unsafe { object::as_ref(frame.function) } {
+                ObjectRef::Function(function) => function,
+                _ => {
+                    eprintln!("call frame contains reference to non-function");
+                    return InterpretResult::RuntimeError;
+                }
+            };
+            let chunk = function.chunk();
+
             if trace_available() {
                 // SAFETY: constants in chunk are valid
                 unsafe {

@@ -31,7 +31,13 @@ impl Compiler {
         Self {
             function: Function::new(),
             kind,
-            locals: vec![],
+            locals: vec![
+                // used by compiler
+                // Local {
+                //     ident: "".into(),
+                //     depth: 0,
+                // },
+            ],
             block_depth: 0,
         }
     }

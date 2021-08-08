@@ -76,7 +76,7 @@ fn main() -> std::io::Result<()> {
         unsafe {
             let function = compiler.finish();
             function.trace();
-            vm.run(function.chunk());
+            vm.run(function);
         }
     }
 
