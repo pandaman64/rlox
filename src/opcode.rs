@@ -1,7 +1,7 @@
 use num::FromPrimitive as _;
 use num_derive::{FromPrimitive, ToPrimitive};
 
-use std::convert::TryFrom;
+use std::{convert::TryFrom, fmt};
 
 use crate::{trace_available, value::Value};
 
@@ -33,7 +33,6 @@ pub enum OpCode {
     JumpIfFalse,
 }
 
-#[derive(Default)]
 pub struct Chunk {
     // invariant: code.len() == line.len()
     code: Vec<u8>,
@@ -43,7 +42,11 @@ pub struct Chunk {
 
 impl Chunk {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            code: vec![],
+            line: vec![],
+            constants: vec![],
+        }
     }
 }
 
@@ -134,7 +137,7 @@ impl Chunk {
     }
 
     /// SAFETY: constants in this chunk must be valid
-    pub unsafe fn trace_chunk(&self, name: &str) {
+    pub unsafe fn trace_chunk<N: fmt::Display>(&self, name: N) {
         if trace_available() {
             eprintln!("== {} ==", name);
             let mut offset = 0;

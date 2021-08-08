@@ -1,5 +1,6 @@
 use crate::{
     ast::{BinOpKind, Decl, Expr, ForInit, Identifier, Primary, Stmt, UnaryOpKind, VarDecl},
+    object::Function,
     opcode::{Chunk, OpCode},
     value::Value,
     vm::Vm,
@@ -12,17 +13,32 @@ struct Local {
     depth: usize,
 }
 
+#[derive(Debug)]
+pub enum FunctionKind {
+    Function,
+    Script,
+}
+
 pub struct Compiler {
+    function: Function,
+    kind: FunctionKind,
     locals: Vec<Local>,
     block_depth: usize,
 }
 
 impl Compiler {
-    pub fn new() -> Self {
+    pub fn new(kind: FunctionKind) -> Self {
         Self {
+            function: Function::new(),
+            kind,
             locals: vec![],
             block_depth: 0,
         }
+    }
+
+    pub fn finish(mut self) -> Function {
+        self.gen_return();
+        self.function
     }
 
     fn push_local(&mut self, ident: &str) {
@@ -51,13 +67,13 @@ impl Compiler {
         self.block_depth += 1;
     }
 
-    fn end_block(&mut self, chunk: &mut Chunk) {
+    fn end_block(&mut self) {
         while let Some(local) = self.locals.last() {
             if local.depth != self.block_depth {
                 break;
             }
             self.locals.pop();
-            chunk.push_code(OpCode::Pop as _, 0);
+            self.chunk_mut().push_code(OpCode::Pop as _, 0);
         }
         self.block_depth -= 1;
     }
@@ -82,7 +98,16 @@ impl Compiler {
             .map(|(i, _)| i)
     }
 
-    fn gen_place(&mut self, vm: &mut Vm, chunk: &mut Chunk, expr: Expr) -> (bool, Identifier) {
+    fn chunk_mut(&mut self) -> &mut Chunk {
+        self.function.chunk_mut()
+    }
+
+    fn gen_return(&mut self) {
+        self.chunk_mut().push_code(OpCode::Nil as _, 0);
+        self.chunk_mut().push_code(OpCode::Return as _, 0);
+    }
+
+    fn gen_place(&mut self, vm: &mut Vm, expr: Expr) -> (bool, Identifier) {
         match expr {
             Expr::Primary(Primary::Identifier(ident)) => (false, ident),
             Expr::BinOp(expr) if expr.kind() == BinOpKind::Dot => {
@@ -93,7 +118,7 @@ impl Compiler {
                     Expr::Primary(Primary::Identifier(ident)) => ident,
                     _ => todo!("non-identifier expression is used as field"),
                 };
-                self.gen_expr(vm, chunk, target);
+                self.gen_expr(vm, target);
                 (true, ident)
             }
             // TODO: emit error message
@@ -101,16 +126,16 @@ impl Compiler {
         }
     }
 
-    fn gen_expr(&mut self, vm: &mut Vm, chunk: &mut Chunk, expr: Expr) {
+    fn gen_expr(&mut self, vm: &mut Vm, expr: Expr) {
         match expr {
             Expr::UnaryOp(expr) => {
                 let operand = Expr::cast(expr.operand().unwrap()).unwrap();
-                self.gen_expr(vm, chunk, operand);
+                self.gen_expr(vm, operand);
                 let opcode = match expr.kind() {
                     UnaryOpKind::Negation => OpCode::Negate,
                     UnaryOpKind::Not => OpCode::Not,
                 };
-                chunk.push_code(opcode as _, 0);
+                self.chunk_mut().push_code(opcode as _, 0);
             }
             Expr::BinOp(expr) => {
                 let opcodes: &[OpCode] = match expr.kind() {
@@ -118,24 +143,25 @@ impl Compiler {
                         let mut operands = expr.operands();
                         let lhs = operands.next().unwrap();
                         let rhs = operands.next().unwrap();
-                        let (has_target, ident) = self.gen_place(vm, chunk, lhs);
+                        let (has_target, ident) = self.gen_place(vm, lhs);
                         if has_target {
                             todo!()
                         } else {
                             match self.resolve_local(ident.to_str()) {
                                 Some(i) => {
-                                    self.gen_expr(vm, chunk, rhs);
-                                    chunk.push_code(OpCode::SetLocal as _, 0);
-                                    chunk.push_code(i as _, 0);
+                                    self.gen_expr(vm, rhs);
+                                    self.chunk_mut().push_code(OpCode::SetLocal as _, 0);
+                                    self.chunk_mut().push_code(i as _, 0);
                                 }
                                 None => {
                                     let ident = vm.allocate_string(ident.to_str().into());
-                                    let index =
-                                        chunk.push_constant(Value::Object(ident.into_raw_obj()));
+                                    let index = self
+                                        .chunk_mut()
+                                        .push_constant(Value::Object(ident.into_raw_obj()));
 
-                                    self.gen_expr(vm, chunk, rhs);
-                                    chunk.push_code(OpCode::SetGlobal as _, 0);
-                                    chunk.push_code(index, 0);
+                                    self.gen_expr(vm, rhs);
+                                    self.chunk_mut().push_code(OpCode::SetGlobal as _, 0);
+                                    self.chunk_mut().push_code(index, 0);
                                 }
                             }
                         }
@@ -146,19 +172,19 @@ impl Compiler {
                         let lhs = operands.next().unwrap();
                         let rhs = operands.next().unwrap();
 
-                        self.gen_expr(vm, chunk, lhs);
+                        self.gen_expr(vm, lhs);
 
-                        chunk.push_code(OpCode::JumpIfFalse as _, 0);
-                        let rhs_jump = chunk.allocate_jump_location(0);
+                        self.chunk_mut().push_code(OpCode::JumpIfFalse as _, 0);
+                        let rhs_jump = self.chunk_mut().allocate_jump_location(0);
 
-                        chunk.push_code(OpCode::Jump as _, 0);
-                        let end_jump = chunk.allocate_jump_location(0);
+                        self.chunk_mut().push_code(OpCode::Jump as _, 0);
+                        let end_jump = self.chunk_mut().allocate_jump_location(0);
 
-                        chunk.fill_jump_location_with_current(rhs_jump);
-                        chunk.push_code(OpCode::Pop as _, 0);
-                        self.gen_expr(vm, chunk, rhs);
+                        self.chunk_mut().fill_jump_location_with_current(rhs_jump);
+                        self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                        self.gen_expr(vm, rhs);
 
-                        chunk.fill_jump_location_with_current(end_jump);
+                        self.chunk_mut().fill_jump_location_with_current(end_jump);
                         return;
                     }
                     BinOpKind::And => {
@@ -166,15 +192,15 @@ impl Compiler {
                         let lhs = operands.next().unwrap();
                         let rhs = operands.next().unwrap();
 
-                        self.gen_expr(vm, chunk, lhs);
+                        self.gen_expr(vm, lhs);
 
-                        chunk.push_code(OpCode::JumpIfFalse as _, 0);
-                        let end_jump = chunk.allocate_jump_location(0);
+                        self.chunk_mut().push_code(OpCode::JumpIfFalse as _, 0);
+                        let end_jump = self.chunk_mut().allocate_jump_location(0);
 
-                        chunk.push_code(OpCode::Pop as _, 0);
-                        self.gen_expr(vm, chunk, rhs);
+                        self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                        self.gen_expr(vm, rhs);
 
-                        chunk.fill_jump_location_with_current(end_jump);
+                        self.chunk_mut().fill_jump_location_with_current(end_jump);
                         return;
                     }
                     BinOpKind::Equal => &[OpCode::Equal],
@@ -190,67 +216,73 @@ impl Compiler {
                     BinOpKind::Dot => todo!(),
                 };
                 for operand in expr.operands() {
-                    self.gen_expr(vm, chunk, operand);
+                    self.gen_expr(vm, operand);
                 }
                 for opcode in opcodes.iter() {
-                    chunk.push_code(*opcode as _, 0);
+                    self.chunk_mut().push_code(*opcode as _, 0);
                 }
             }
             Expr::Primary(expr) => match expr {
                 Primary::Identifier(ident) => match self.resolve_local(ident.to_str()) {
                     Some(i) => {
-                        chunk.push_code(OpCode::GetLocal as _, 0);
-                        chunk.push_code(i as u8, 0);
+                        self.chunk_mut().push_code(OpCode::GetLocal as _, 0);
+                        self.chunk_mut().push_code(i as u8, 0);
                     }
                     None => {
                         let ident = vm.allocate_string(ident.to_str().into());
-                        let index = chunk.push_constant(Value::Object(ident.into_raw_obj()));
+                        let index = self
+                            .chunk_mut()
+                            .push_constant(Value::Object(ident.into_raw_obj()));
 
-                        chunk.push_code(OpCode::GetGlobal as _, 0);
-                        chunk.push_code(index, 0);
+                        self.chunk_mut().push_code(OpCode::GetGlobal as _, 0);
+                        self.chunk_mut().push_code(index, 0);
                     }
                 },
                 Primary::NilLiteral(_) => {
-                    chunk.push_code(OpCode::Nil as _, 0);
+                    self.chunk_mut().push_code(OpCode::Nil as _, 0);
                 }
                 Primary::BooleanLiteral(b) => {
                     if b.to_boolean() {
-                        chunk.push_code(OpCode::True as _, 0);
+                        self.chunk_mut().push_code(OpCode::True as _, 0);
                     } else {
-                        chunk.push_code(OpCode::False as _, 0);
+                        self.chunk_mut().push_code(OpCode::False as _, 0);
                     }
                 }
                 Primary::StringLiteral(s) => {
                     let obj = vm.allocate_string(s.to_str().into());
-                    let index = chunk.push_constant(Value::Object(obj.into_raw_obj()));
-                    chunk.push_code(OpCode::Constant as _, 0);
-                    chunk.push_code(index, 0);
+                    let index = self
+                        .chunk_mut()
+                        .push_constant(Value::Object(obj.into_raw_obj()));
+                    self.chunk_mut().push_code(OpCode::Constant as _, 0);
+                    self.chunk_mut().push_code(index, 0);
                 }
                 Primary::NumberLiteral(num) => {
-                    let index = chunk.push_constant(Value::Number(num.to_number()));
-                    chunk.push_code(OpCode::Constant as _, 0);
-                    chunk.push_code(index, 0);
+                    let index = self
+                        .chunk_mut()
+                        .push_constant(Value::Number(num.to_number()));
+                    self.chunk_mut().push_code(OpCode::Constant as _, 0);
+                    self.chunk_mut().push_code(index, 0);
                 }
             },
         }
     }
 
-    fn gen_stmt(&mut self, vm: &mut Vm, chunk: &mut Chunk, stmt: Stmt) {
+    fn gen_stmt(&mut self, vm: &mut Vm, stmt: Stmt) {
         match stmt {
             Stmt::ExprStmt(stmt) => {
-                self.gen_expr(vm, chunk, stmt.expr().unwrap());
-                chunk.push_code(OpCode::Pop as _, 0);
+                self.gen_expr(vm, stmt.expr().unwrap());
+                self.chunk_mut().push_code(OpCode::Pop as _, 0);
             }
             Stmt::PrintStmt(stmt) => {
-                self.gen_expr(vm, chunk, stmt.expr().unwrap());
-                chunk.push_code(OpCode::Print as _, 0);
+                self.gen_expr(vm, stmt.expr().unwrap());
+                self.chunk_mut().push_code(OpCode::Print as _, 0);
             }
             Stmt::BlockStmt(stmt) => {
                 self.begin_block();
                 for decl in stmt.decls() {
-                    self.gen_decl(vm, chunk, decl);
+                    self.gen_decl(vm, decl);
                 }
-                self.end_block(chunk);
+                self.end_block();
             }
             Stmt::IfStmt(stmt) => {
                 let cond = stmt.cond().unwrap();
@@ -258,121 +290,125 @@ impl Compiler {
                 let then_branch = branches.next().unwrap();
                 let else_branch = branches.next();
 
-                self.gen_expr(vm, chunk, cond);
+                self.gen_expr(vm, cond);
 
-                chunk.push_code(OpCode::JumpIfFalse as _, 0);
-                let else_jump = chunk.allocate_jump_location(0);
+                self.chunk_mut().push_code(OpCode::JumpIfFalse as _, 0);
+                let else_jump = self.chunk_mut().allocate_jump_location(0);
 
-                chunk.push_code(OpCode::Pop as _, 0);
-                self.gen_stmt(vm, chunk, then_branch);
+                self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                self.gen_stmt(vm, then_branch);
 
                 if let Some(else_branch) = else_branch {
-                    chunk.push_code(OpCode::Jump as _, 0);
-                    let end_jump = chunk.allocate_jump_location(0);
+                    self.chunk_mut().push_code(OpCode::Jump as _, 0);
+                    let end_jump = self.chunk_mut().allocate_jump_location(0);
 
-                    chunk.fill_jump_location_with_current(else_jump);
-                    chunk.push_code(OpCode::Pop as _, 0);
-                    self.gen_stmt(vm, chunk, else_branch);
+                    self.chunk_mut().fill_jump_location_with_current(else_jump);
+                    self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                    self.gen_stmt(vm, else_branch);
 
-                    chunk.fill_jump_location_with_current(end_jump);
+                    self.chunk_mut().fill_jump_location_with_current(end_jump);
                 } else {
-                    chunk.fill_jump_location_with_current(else_jump);
-                    chunk.push_code(OpCode::Pop as _, 0);
+                    self.chunk_mut().fill_jump_location_with_current(else_jump);
+                    self.chunk_mut().push_code(OpCode::Pop as _, 0);
                 }
             }
             Stmt::WhileStmt(stmt) => {
                 let cond = stmt.cond().unwrap();
                 let body = stmt.body().unwrap();
 
-                let start_loop_ip = chunk.code().len();
+                let start_loop_ip = self.chunk_mut().code().len();
 
-                self.gen_expr(vm, chunk, cond);
+                self.gen_expr(vm, cond);
 
-                chunk.push_code(OpCode::JumpIfFalse as _, 0);
-                let end_jump = chunk.allocate_jump_location(0);
+                self.chunk_mut().push_code(OpCode::JumpIfFalse as _, 0);
+                let end_jump = self.chunk_mut().allocate_jump_location(0);
 
-                chunk.push_code(OpCode::Pop as _, 0);
-                self.gen_stmt(vm, chunk, body);
+                self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                self.gen_stmt(vm, body);
 
-                chunk.push_code(OpCode::Jump as _, 0);
-                let start_jump = chunk.allocate_jump_location(0);
-                chunk.fill_jump_location(start_jump, start_loop_ip);
+                self.chunk_mut().push_code(OpCode::Jump as _, 0);
+                let start_jump = self.chunk_mut().allocate_jump_location(0);
+                self.chunk_mut()
+                    .fill_jump_location(start_jump, start_loop_ip);
 
-                chunk.fill_jump_location_with_current(end_jump);
-                chunk.push_code(OpCode::Pop as _, 0);
+                self.chunk_mut().fill_jump_location_with_current(end_jump);
+                self.chunk_mut().push_code(OpCode::Pop as _, 0);
             }
             Stmt::ForStmt(stmt) => {
                 self.begin_block();
 
                 match stmt.init() {
                     Some(ForInit::Expr(expr)) => {
-                        self.gen_expr(vm, chunk, expr);
-                        chunk.push_code(OpCode::Pop as _, 0);
+                        self.gen_expr(vm, expr);
+                        self.chunk_mut().push_code(OpCode::Pop as _, 0);
                     }
-                    Some(ForInit::VarDecl(decl)) => self.gen_var_decl(vm, chunk, decl),
+                    Some(ForInit::VarDecl(decl)) => self.gen_var_decl(vm, decl),
                     _ => {}
                 }
 
-                let start_loop_ip = chunk.code().len();
+                let start_loop_ip = self.chunk_mut().code().len();
 
                 let end_jump = stmt.cond().map(|cond| {
-                    self.gen_expr(vm, chunk, cond.expr().unwrap());
-                    chunk.push_code(OpCode::JumpIfFalse as _, 0);
-                    let end_jump = chunk.allocate_jump_location(0);
-                    chunk.push_code(OpCode::Pop as _, 0);
+                    self.gen_expr(vm, cond.expr().unwrap());
+                    self.chunk_mut().push_code(OpCode::JumpIfFalse as _, 0);
+                    let end_jump = self.chunk_mut().allocate_jump_location(0);
+                    self.chunk_mut().push_code(OpCode::Pop as _, 0);
                     end_jump
                 });
 
-                self.gen_stmt(vm, chunk, stmt.body().unwrap());
+                self.gen_stmt(vm, stmt.body().unwrap());
 
                 if let Some(incr) = stmt.incr() {
-                    self.gen_expr(vm, chunk, incr.expr().unwrap());
-                    chunk.push_code(OpCode::Pop as _, 0);
+                    self.gen_expr(vm, incr.expr().unwrap());
+                    self.chunk_mut().push_code(OpCode::Pop as _, 0);
                 }
 
-                chunk.push_code(OpCode::Jump as _, 0);
-                let start_jump = chunk.allocate_jump_location(0);
-                chunk.fill_jump_location(start_jump, start_loop_ip);
+                self.chunk_mut().push_code(OpCode::Jump as _, 0);
+                let start_jump = self.chunk_mut().allocate_jump_location(0);
+                self.chunk_mut()
+                    .fill_jump_location(start_jump, start_loop_ip);
 
                 if let Some(end_jump) = end_jump {
-                    chunk.fill_jump_location_with_current(end_jump);
+                    self.chunk_mut().fill_jump_location_with_current(end_jump);
                 }
-                chunk.push_code(OpCode::Pop as _, 0);
+                self.chunk_mut().push_code(OpCode::Pop as _, 0);
 
-                self.end_block(chunk);
+                self.end_block();
             }
         }
     }
 
-    fn gen_var_decl(&mut self, vm: &mut Vm, chunk: &mut Chunk, decl: VarDecl) {
+    fn gen_var_decl(&mut self, vm: &mut Vm, decl: VarDecl) {
         if self.block_depth > GLOBAL_BLOCK {
             let ident = decl.ident().unwrap();
             let ident = ident.to_str();
             self.push_local(ident);
 
             match decl.expr() {
-                Some(expr) => self.gen_expr(vm, chunk, expr),
-                None => chunk.push_code(OpCode::Nil as _, 0),
+                Some(expr) => self.gen_expr(vm, expr),
+                None => self.chunk_mut().push_code(OpCode::Nil as _, 0),
             }
 
             self.locals.last_mut().unwrap().depth = self.block_depth;
         } else {
             let ident = vm.allocate_string(decl.ident().unwrap().to_str().into());
-            let index = chunk.push_constant(Value::Object(ident.into_raw_obj()));
+            let index = self
+                .chunk_mut()
+                .push_constant(Value::Object(ident.into_raw_obj()));
 
             match decl.expr() {
-                Some(expr) => self.gen_expr(vm, chunk, expr),
-                None => chunk.push_code(OpCode::Nil as _, 0),
+                Some(expr) => self.gen_expr(vm, expr),
+                None => self.chunk_mut().push_code(OpCode::Nil as _, 0),
             }
-            chunk.push_code(OpCode::DefineGlobal as _, 0);
-            chunk.push_code(index, 0);
+            self.chunk_mut().push_code(OpCode::DefineGlobal as _, 0);
+            self.chunk_mut().push_code(index, 0);
         }
     }
 
-    pub fn gen_decl(&mut self, vm: &mut Vm, chunk: &mut Chunk, decl: Decl) {
+    pub fn gen_decl(&mut self, vm: &mut Vm, decl: Decl) {
         match decl {
-            Decl::VarDecl(decl) => self.gen_var_decl(vm, chunk, decl),
-            Decl::Stmt(stmt) => self.gen_stmt(vm, chunk, stmt),
+            Decl::VarDecl(decl) => self.gen_var_decl(vm, decl),
+            Decl::Stmt(stmt) => self.gen_stmt(vm, stmt),
         }
     }
 }

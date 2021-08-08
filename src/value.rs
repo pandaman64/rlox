@@ -12,7 +12,7 @@ pub enum Value {
     Object(RawObject),
 }
 
-enum ValueDisplay<'v> {
+pub enum ValueDisplay<'v> {
     Nil,
     Bool(bool),
     Number(f64),
@@ -37,21 +37,22 @@ impl fmt::Display for ValueDisplay<'_> {
     }
 }
 
+/// SAFETY: `obj` must be a (recursively) valid object.
+pub unsafe fn format_obj<'obj>(obj: RawObject) -> ValueDisplay<'obj> {
+    // SAFETY: this object is valid, so the type must match the runtime representation
+    match unsafe { object::as_ref(obj) } {
+        ObjectRef::Str(str) => ValueDisplay::Str(str.as_rust_str()),
+        ObjectRef::Function(fun) => match fun.name() {
+            None => ValueDisplay::Script,
+            // SAFETY: the object must be recursively valid.
+            Some(name) => ValueDisplay::Function(Value::Object(name)),
+        },
+    }
+}
+
 impl Value {
     /// SAFETY: `self` must be a valid object (initialized and not freed).
-    pub unsafe fn format_args(&self) -> impl fmt::Display + '_ {
-        /// SAFETY: `obj` must be a (recursively) valid object.
-        unsafe fn format_obj<'obj>(obj: RawObject) -> ValueDisplay<'obj> {
-            // SAFETY: this object is valid, so the type must match the runtime representation
-            match unsafe { object::as_ref(obj) } {
-                ObjectRef::Str(str) => ValueDisplay::Str(str.as_rust_str()),
-                ObjectRef::Function(fun) => match fun.name() {
-                    None => ValueDisplay::Script,
-                    // SAFETY: the object must be recursively valid.
-                    Some(name) => ValueDisplay::Function(Value::Object(name)),
-                },
-            }
-        }
+    pub unsafe fn format_args(&self) -> ValueDisplay<'_> {
         use Value::*;
 
         match self {

@@ -21,8 +21,7 @@ use vm::Vm;
 
 use crate::{
     ast::Root,
-    codegen::Compiler,
-    opcode::{Chunk, OpCode},
+    codegen::{Compiler, FunctionKind},
 };
 
 pub fn trace_available() -> bool {
@@ -47,7 +46,6 @@ fn main() -> std::io::Result<()> {
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
     let mut vm = Vm::new();
-    let mut compiler = Compiler::new();
 
     loop {
         line.clear();
@@ -61,24 +59,24 @@ fn main() -> std::io::Result<()> {
         if trace_available() {
             eprintln!("{:#?}", node);
         }
-        let chunk = match Root::cast(node) {
+
+        let mut compiler = Compiler::new(FunctionKind::Script);
+        match Root::cast(node) {
             None => {
                 eprintln!("syntax error");
                 continue;
             }
             Some(root) => {
-                let mut chunk = Chunk::default();
                 for decl in root.decls() {
-                    compiler.gen_decl(&mut vm, &mut chunk, decl);
+                    compiler.gen_decl(&mut vm, decl);
                 }
-                chunk.push_code(OpCode::Return as _, 0);
-                chunk
             }
         };
         // SAFETY: we construct a chunk with valid constants
         unsafe {
-            chunk.trace_chunk(line.trim());
-            vm.run(&chunk);
+            let function = compiler.finish();
+            function.trace();
+            vm.run(function.chunk());
         }
     }
 

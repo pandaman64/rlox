@@ -1,6 +1,6 @@
 use std::ptr::{self, NonNull};
 
-use crate::opcode::Chunk;
+use crate::{opcode::Chunk, value};
 
 // the pointer must have valid provenance not only for the header but the whole object
 pub type RawObject = NonNull<Header>;
@@ -74,19 +74,39 @@ pub struct Function {
 }
 
 impl Function {
-    pub fn new(arity: u32, name: Option<RawObject>) -> Self {
+    pub fn new() -> Self {
         Self {
             header: Header {
                 kind: ObjectKind::Function,
                 next: None,
             },
-            arity,
+            arity: 0,
             chunk: Chunk::new(),
-            name,
+            name: None,
         }
     }
 
     pub fn name(&self) -> Option<RawObject> {
         self.name
+    }
+
+    pub fn chunk(&self) -> &Chunk {
+        &self.chunk
+    }
+
+    pub fn chunk_mut(&mut self) -> &mut Chunk {
+        &mut self.chunk
+    }
+
+    /// SAFETY: self must be a valid function
+    pub unsafe fn trace(&self) {
+        let chunk = &self.chunk;
+        // SAFETY: self is a valid function, so the chunk and name is valid too
+        unsafe {
+            match self.name {
+                None => chunk.trace_chunk("<top-level script>"),
+                Some(name) => chunk.trace_chunk(value::format_obj(name)),
+            }
+        }
     }
 }
