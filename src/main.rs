@@ -19,10 +19,7 @@ use std::{
 };
 use vm::Vm;
 
-use crate::{
-    ast::Root,
-    codegen::{Compiler, FunctionKind},
-};
+use crate::{ast::Root, codegen::Compiler};
 
 pub fn trace_available() -> bool {
     static AVAILABLE: AtomicBool = AtomicBool::new(false);
@@ -60,7 +57,7 @@ fn main() -> std::io::Result<()> {
             eprintln!("{:#?}", node);
         }
 
-        let mut compiler = Compiler::new(FunctionKind::Script);
+        let mut compiler = Compiler::new_script();
         match Root::cast(node) {
             None => {
                 eprintln!("syntax error");

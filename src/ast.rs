@@ -1,12 +1,17 @@
-use rowan::NodeOrToken;
-
-use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
+use crate::syntax::{NodeOrToken, SyntaxKind, SyntaxNode, SyntaxToken};
 
 fn first_nontirivial_token(node: &SyntaxNode) -> Option<SyntaxToken> {
     node.children_with_tokens().find_map(|child| match child {
         NodeOrToken::Token(token) if !token.kind().is_trivial() => Some(token),
         _ => None,
     })
+}
+
+fn try_as_ident(child: NodeOrToken) -> Option<Identifier> {
+    match child {
+        NodeOrToken::Token(token) => Identifier::cast(token),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -272,16 +277,48 @@ impl VarDecl {
     }
 
     pub fn ident(&self) -> Option<Identifier> {
-        self.inner
-            .children_with_tokens()
-            .find_map(|child| match child {
-                NodeOrToken::Token(token) => Identifier::cast(token),
-                _ => None,
-            })
+        self.inner.children_with_tokens().find_map(try_as_ident)
     }
 
     pub fn expr(&self) -> Option<Expr> {
         self.inner.children().find_map(Expr::cast)
+    }
+}
+
+#[derive(Debug)]
+pub struct FunDecl {
+    inner: SyntaxNode,
+}
+
+impl FunDecl {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::FunDeclNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn ident(&self) -> Option<Identifier> {
+        self.inner.children_with_tokens().find_map(try_as_ident)
+    }
+
+    pub fn params(&self) -> impl Iterator<Item = Identifier> {
+        self.inner
+            .children()
+            .find_map(|child| {
+                if child.kind() == SyntaxKind::FunParamsNode {
+                    Some(child.children_with_tokens().filter_map(try_as_ident))
+                } else {
+                    None
+                }
+            })
+            .into_iter()
+            .flatten()
+    }
+
+    pub fn body(&self) -> Option<BlockStmt> {
+        self.inner.children().find_map(BlockStmt::cast)
     }
 }
 
@@ -517,6 +554,7 @@ impl Stmt {
 #[derive(Debug)]
 pub enum Decl {
     VarDecl(VarDecl),
+    FunDecl(FunDecl),
     Stmt(Stmt),
 }
 
@@ -528,6 +566,7 @@ impl Decl {
             let child = inner.first_child()?;
             Some(match child.kind() {
                 VarDeclNode => Self::VarDecl(VarDecl::cast(child)?),
+                FunDeclNode => Self::FunDecl(FunDecl::cast(child)?),
                 StmtNode => Self::Stmt(Stmt::cast(child)?),
                 _ => return None,
             })

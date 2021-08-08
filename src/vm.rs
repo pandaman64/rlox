@@ -174,17 +174,27 @@ impl Vm {
 
             match self.strings.get(&str_ptr) {
                 None => {
-                    self.add_object_head(str_ptr.clone().into_raw_obj());
-                    self.strings.insert(str_ptr.clone());
+                    self.add_object_head(str_ptr.into_raw_obj());
+                    self.strings.insert(str_ptr);
                     str_ptr
                 }
                 Some(interned) => {
                     // free the constructed string since we return from the strings table
                     drop(Box::from_raw(str_ptr.into_inner().as_ptr()));
-                    interned.clone()
+                    *interned
                 }
             }
         }
+    }
+
+    pub fn allocate_function(&mut self, function: Function) -> RawObject {
+        let fun_ptr = Box::into_raw(Box::new(function));
+        let obj = RawObject::new(fun_ptr as _).unwrap();
+        // SAFETY: obj points to a valid object
+        unsafe {
+            self.add_object_head(obj);
+        }
+        obj
     }
 
     // SAFETY: function must be valid
@@ -194,13 +204,7 @@ impl Vm {
         use Value::*;
 
         self.stack = vec![];
-        let function = {
-            let obj_ptr = Box::into_raw(Box::new(function));
-            RawObject::new(obj_ptr as _).unwrap()
-        };
-        unsafe {
-            self.add_object_head(function);
-        }
+        let function = self.allocate_function(function);
         self.frames = vec![CallFrame {
             function,
             ip: 0,

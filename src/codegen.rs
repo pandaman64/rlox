@@ -1,7 +1,10 @@
 use crate::{
-    ast::{BinOpKind, Decl, Expr, ForInit, Identifier, Primary, Stmt, UnaryOpKind, VarDecl},
+    ast::{
+        BinOpKind, BlockStmt, Decl, Expr, ForInit, Identifier, Primary, Stmt, UnaryOpKind, VarDecl,
+    },
     object::Function,
     opcode::{Chunk, OpCode},
+    table::InternedStr,
     value::Value,
     vm::Vm,
 };
@@ -19,18 +22,20 @@ pub enum FunctionKind {
     Script,
 }
 
-pub struct Compiler {
+pub struct Compiler<'parent> {
+    parent: Option<&'parent Compiler<'parent>>,
     function: Function,
     kind: FunctionKind,
     locals: Vec<Local>,
     block_depth: usize,
 }
 
-impl Compiler {
-    pub fn new(kind: FunctionKind) -> Self {
+impl<'parent> Compiler<'parent> {
+    pub fn new_script() -> Self {
         Self {
-            function: Function::new(),
-            kind,
+            parent: None,
+            function: Function::new_script(),
+            kind: FunctionKind::Script,
             locals: vec![
                 // used by compiler
                 // Local {
@@ -38,6 +43,16 @@ impl Compiler {
                 //     depth: 0,
                 // },
             ],
+            block_depth: 0,
+        }
+    }
+
+    fn new_function(parent: &'parent Compiler<'parent>, name: InternedStr, arity: u32) -> Self {
+        Self {
+            parent: Some(parent),
+            function: Function::new_function(name, arity),
+            kind: FunctionKind::Function,
+            locals: vec![],
             block_depth: 0,
         }
     }
@@ -273,6 +288,14 @@ impl Compiler {
         }
     }
 
+    fn gen_block_stmt(&mut self, vm: &mut Vm, stmt: BlockStmt) {
+        self.begin_block();
+        for decl in stmt.decls() {
+            self.gen_decl(vm, decl);
+        }
+        self.end_block();
+    }
+
     fn gen_stmt(&mut self, vm: &mut Vm, stmt: Stmt) {
         match stmt {
             Stmt::ExprStmt(stmt) => {
@@ -283,13 +306,7 @@ impl Compiler {
                 self.gen_expr(vm, stmt.expr().unwrap());
                 self.chunk_mut().push_code(OpCode::Print as _, 0);
             }
-            Stmt::BlockStmt(stmt) => {
-                self.begin_block();
-                for decl in stmt.decls() {
-                    self.gen_decl(vm, decl);
-                }
-                self.end_block();
-            }
+            Stmt::BlockStmt(stmt) => self.gen_block_stmt(vm, stmt),
             Stmt::IfStmt(stmt) => {
                 let cond = stmt.cond().unwrap();
                 let mut branches = stmt.branches();
@@ -384,36 +401,65 @@ impl Compiler {
         }
     }
 
-    fn gen_var_decl(&mut self, vm: &mut Vm, decl: VarDecl) {
+    fn define_variable<F>(&mut self, vm: &mut Vm, ident: Identifier, gen_value: F)
+    where
+        F: FnOnce(&mut Self, &mut Vm),
+    {
+        eprintln!(
+            "ident = {}, block_depth = {}",
+            ident.to_str(),
+            self.block_depth
+        );
         if self.block_depth > GLOBAL_BLOCK {
-            let ident = decl.ident().unwrap();
-            let ident = ident.to_str();
-            self.push_local(ident);
-
-            match decl.expr() {
-                Some(expr) => self.gen_expr(vm, expr),
-                None => self.chunk_mut().push_code(OpCode::Nil as _, 0),
-            }
-
-            self.locals.last_mut().unwrap().depth = self.block_depth;
+            let idx = self.locals.len();
+            self.push_local(ident.to_str());
+            gen_value(self, vm);
+            assert_eq!(idx + 1, self.locals.len());
+            self.locals[idx].depth = self.block_depth;
         } else {
-            let ident = vm.allocate_string(decl.ident().unwrap().to_str().into());
+            let ident = vm.allocate_string(ident.to_str().into());
             let index = self
                 .chunk_mut()
                 .push_constant(Value::Object(ident.into_raw_obj()));
-
-            match decl.expr() {
-                Some(expr) => self.gen_expr(vm, expr),
-                None => self.chunk_mut().push_code(OpCode::Nil as _, 0),
-            }
+            gen_value(self, vm);
             self.chunk_mut().push_code(OpCode::DefineGlobal as _, 0);
             self.chunk_mut().push_code(index, 0);
         }
     }
 
+    fn gen_var_decl(&mut self, vm: &mut Vm, decl: VarDecl) {
+        let ident = decl.ident().unwrap();
+        let expr = decl.expr();
+        self.define_variable(vm, ident, move |this, vm| match expr {
+            Some(expr) => this.gen_expr(vm, expr),
+            None => this.chunk_mut().push_code(OpCode::Nil as _, 0),
+        });
+    }
+
     pub fn gen_decl(&mut self, vm: &mut Vm, decl: Decl) {
         match decl {
             Decl::VarDecl(decl) => self.gen_var_decl(vm, decl),
+            Decl::FunDecl(decl) => {
+                let name = decl.ident().unwrap();
+                let name = vm.allocate_string(name.to_str().into());
+                let arity = decl.params().count() as u32;
+                let mut compiler = Compiler::new_function(self, name, arity);
+                compiler.begin_block();
+                for param in decl.params() {
+                    compiler.push_local(param.to_str());
+                    compiler.locals.last_mut().unwrap().depth = compiler.block_depth;
+                }
+                compiler.gen_block_stmt(vm, decl.body().unwrap());
+                compiler.end_block();
+                let function = compiler.finish();
+                let fun_obj = vm.allocate_function(function);
+
+                self.define_variable(vm, decl.ident().unwrap(), move |this, _vm| {
+                    let index = this.chunk_mut().push_constant(Value::Object(fun_obj));
+                    this.chunk_mut().push_code(OpCode::Constant as _, 0);
+                    this.chunk_mut().push_code(index, 0);
+                });
+            }
             Decl::Stmt(stmt) => self.gen_stmt(vm, stmt),
         }
     }

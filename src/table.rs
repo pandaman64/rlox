@@ -5,7 +5,7 @@ use std::{
 
 use crate::object::{RawObject, RawStr};
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct InternedStr(RawStr);
 
 impl PartialEq for InternedStr {

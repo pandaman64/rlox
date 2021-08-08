@@ -158,6 +158,21 @@ where
         self.builder.finish_node();
     }
 
+    fn parse_block_stmt(&mut self) {
+        use SyntaxKind::*;
+
+        self.builder.start_node(BlockStmtNode.into());
+        self.expect(BraceOpenToken);
+        while let Some(next) = self.peek() {
+            if next == BraceCloseToken {
+                break;
+            }
+            self.parse_decl();
+        }
+        self.expect(BraceCloseToken);
+        self.builder.finish_node();
+    }
+
     fn parse_stmt(&mut self) {
         use SyntaxKind::*;
 
@@ -173,18 +188,7 @@ where
                         self.expect(SemicolonToken);
                         self.builder.finish_node();
                     }
-                    BraceOpenToken => {
-                        self.builder.start_node(BlockStmtNode.into());
-                        self.bump();
-                        while let Some(next) = self.peek() {
-                            if next == BraceCloseToken {
-                                break;
-                            }
-                            self.parse_decl();
-                        }
-                        self.expect(BraceCloseToken);
-                        self.builder.finish_node();
-                    }
+                    BraceOpenToken => self.parse_block_stmt(),
                     IfToken => {
                         self.builder.start_node(IfStmtNode.into());
                         self.bump();
@@ -279,6 +283,27 @@ where
                             self.parse_expr(BindingPower::Zero);
                         }
                         self.expect(SemicolonToken);
+                        self.builder.finish_node();
+                    }
+                    FunToken => {
+                        self.builder.start_node(FunDeclNode.into());
+                        self.bump();
+                        self.expect(IdentifierToken);
+                        self.expect(ParenOpenToken);
+                        self.builder.start_node(FunParamsNode.into());
+                        while let Some(next) = self.peek() {
+                            if next == ParenCloseToken {
+                                break;
+                            }
+
+                            self.expect(IdentifierToken);
+                            if matches!(self.peek(), Some(CommaToken)) {
+                                self.bump();
+                            }
+                        }
+                        self.builder.finish_node();
+                        self.expect(ParenCloseToken);
+                        self.parse_block_stmt();
                         self.builder.finish_node();
                     }
                     // statements

@@ -105,6 +105,7 @@ pub enum SyntaxKind {
 
     // declarations
     ClassDeclNode,
+    FunParamsNode,
     FunDeclNode,
     VarDeclNode,
     DeclNode,
@@ -159,6 +160,7 @@ impl rowan::Language for Language {
 
 pub type SyntaxToken = rowan::SyntaxToken<Language>;
 pub type SyntaxNode = rowan::SyntaxNode<Language>;
+pub type NodeOrToken = rowan::NodeOrToken<SyntaxNode, SyntaxToken>;
 
 pub fn parse(input: &str) -> SyntaxNode {
     parser::parser(input).parse()

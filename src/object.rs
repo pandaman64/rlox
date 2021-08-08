@@ -1,6 +1,6 @@
 use std::ptr::{self, NonNull};
 
-use crate::{opcode::Chunk, value};
+use crate::{opcode::Chunk, table::InternedStr, value};
 
 // the pointer must have valid provenance not only for the header but the whole object
 pub type RawObject = NonNull<Header>;
@@ -70,11 +70,11 @@ pub struct Function {
     header: Header,
     arity: u32,
     chunk: Chunk,
-    name: Option<RawObject>,
+    name: Option<InternedStr>,
 }
 
 impl Function {
-    pub fn new() -> Self {
+    pub fn new_script() -> Self {
         Self {
             header: Header {
                 kind: ObjectKind::Function,
@@ -86,7 +86,19 @@ impl Function {
         }
     }
 
-    pub fn name(&self) -> Option<RawObject> {
+    pub fn new_function(name: InternedStr, arity: u32) -> Self {
+        Self {
+            header: Header {
+                kind: ObjectKind::Function,
+                next: None,
+            },
+            arity,
+            chunk: Chunk::new(),
+            name: Some(name),
+        }
+    }
+
+    pub fn name(&self) -> Option<InternedStr> {
         self.name
     }
 
@@ -105,7 +117,7 @@ impl Function {
         unsafe {
             match self.name {
                 None => chunk.trace_chunk("<top-level script>"),
-                Some(name) => chunk.trace_chunk(value::format_obj(name)),
+                Some(name) => chunk.trace_chunk(value::format_obj(name.into_raw_obj())),
             }
         }
     }

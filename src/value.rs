@@ -45,7 +45,7 @@ pub unsafe fn format_obj<'obj>(obj: RawObject) -> ValueDisplay<'obj> {
         ObjectRef::Function(fun) => match fun.name() {
             None => ValueDisplay::Script,
             // SAFETY: the object must be recursively valid.
-            Some(name) => ValueDisplay::Function(Value::Object(name)),
+            Some(name) => ValueDisplay::Function(Value::Object(name.into_raw_obj())),
         },
     }
 }
