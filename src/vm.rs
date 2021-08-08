@@ -304,7 +304,17 @@ impl Vm {
             match OpCode::from_u8(instruction) {
                 None => return InterpretResult::CompileError,
                 Some(Return) => {
-                    return InterpretResult::Ok;
+                    let ret = self.stack.pop().unwrap();
+                    let frame = self.frames.pop().unwrap();
+
+                    if self.frames.is_empty() {
+                        // pop the top-level script function object
+                        self.stack.pop();
+                        return InterpretResult::Ok;
+                    }
+
+                    self.stack.truncate(frame.bp);
+                    self.stack.push(ret);
                 }
                 Some(Print) => {
                     match self.stack.pop() {
