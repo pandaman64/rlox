@@ -1,6 +1,10 @@
 use std::ptr::{self, NonNull};
 
-use crate::{opcode::Chunk, table::InternedStr, value};
+use crate::{
+    opcode::Chunk,
+    table::InternedStr,
+    value::{self, Value},
+};
 
 // the pointer must have valid provenance not only for the header but the whole object
 pub type RawObject = NonNull<Header>;
@@ -10,6 +14,7 @@ pub type RawStr = NonNull<Str>;
 pub enum ObjectKind {
     Str,
     Function,
+    NativeFunction,
 }
 
 #[repr(C)]
@@ -22,6 +27,7 @@ pub struct Header {
 pub enum ObjectRef<'a> {
     Str(&'a Str),
     Function(&'a Function),
+    NativeFunction(&'a NativeFunction),
 }
 
 /// SAFETY: the object must be initialized and its kind must match the runtime representation.
@@ -37,6 +43,10 @@ pub unsafe fn as_ref<'a>(obj: RawObject) -> ObjectRef<'a> {
             ObjectKind::Function => {
                 let fun_ptr = obj as *mut Function;
                 ObjectRef::Function(fun_ptr.as_ref().unwrap())
+            }
+            ObjectKind::NativeFunction => {
+                let fun_ptr = obj as *mut NativeFunction;
+                ObjectRef::NativeFunction(fun_ptr.as_ref().unwrap())
             }
         }
     }
@@ -124,5 +134,28 @@ impl Function {
                 Some(name) => chunk.trace_chunk(value::format_obj(name.into_raw_obj())),
             }
         }
+    }
+}
+
+#[repr(C)]
+pub struct NativeFunction {
+    header: Header,
+    // fun takes [fun_obj, arg1, arg2, ..., argN]
+    fun: fn(args: &[Value]) -> Value,
+}
+
+impl NativeFunction {
+    pub fn new(fun: fn(args: &[Value]) -> Value) -> Self {
+        Self {
+            header: Header {
+                kind: ObjectKind::NativeFunction,
+                next: None,
+            },
+            fun,
+        }
+    }
+
+    pub fn fun(&self) -> fn(args: &[Value]) -> Value {
+        self.fun
     }
 }

@@ -19,7 +19,7 @@ use std::{
 };
 use vm::Vm;
 
-use crate::{ast::Root, codegen::Compiler, vm::InterpretResult};
+use crate::{ast::Root, codegen::Compiler, object::NativeFunction, vm::InterpretResult};
 
 pub fn trace_available() -> bool {
     static AVAILABLE: AtomicBool = AtomicBool::new(false);
@@ -43,6 +43,19 @@ fn main() -> std::io::Result<()> {
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
     let mut vm = Vm::new();
+
+    vm.define_native_function(
+        "clock".into(),
+        NativeFunction::new(|_args| {
+            use crate::value::Value;
+            use std::time::*;
+
+            let now = SystemTime::now();
+            let duration = now.duration_since(UNIX_EPOCH).unwrap();
+
+            Value::Number(duration.as_secs_f64())
+        }),
+    );
 
     loop {
         line.clear();

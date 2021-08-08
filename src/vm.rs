@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    object::{self, Function, ObjectKind, ObjectRef, RawObject, RawStr},
+    object::{self, Function, NativeFunction, ObjectKind, ObjectRef, RawObject, RawStr},
     opcode::{Chunk, OpCode},
     table::{InternedStr, Key},
     trace_available,
@@ -101,7 +101,9 @@ fn extract_constant_key(ip: &mut usize, chunk: &Chunk) -> Option<Key> {
                         // SAFETY: we intern all string appears in the program execution
                         Some(Key::new(InternedStr::new(str_ptr)))
                     }
-                    ObjectKind::Function => unreachable!("key must be string"),
+                    ObjectKind::Function | ObjectKind::NativeFunction => {
+                        unreachable!("key must be string")
+                    }
                 }
             }
         }
@@ -163,6 +165,10 @@ impl Vm {
                         let fun_ptr = obj_ptr as *mut object::Function;
                         drop(Box::from_raw(fun_ptr));
                     }
+                    ObjectKind::NativeFunction => {
+                        let fun_ptr = obj_ptr as *mut object::NativeFunction;
+                        drop(Box::from_raw(fun_ptr));
+                    }
                 }
             }
         }
@@ -199,6 +205,29 @@ impl Vm {
         obj
     }
 
+    pub fn define_native_function(&mut self, name: String, function: NativeFunction) {
+        let name = self.allocate_string(name);
+        let fun_obj = {
+            let fun_ptr = Box::into_raw(Box::new(function));
+            let fun_obj = RawObject::new(fun_ptr as _).unwrap();
+            // SAFETY: obj points to a valid object
+            unsafe {
+                self.add_object_head(fun_obj);
+            }
+            fun_obj
+        };
+
+        // register objects as GC roots
+        self.stack.push(Value::Object(name.into_raw_obj()));
+        self.stack.push(Value::Object(fun_obj));
+
+        self.globals.insert(Key::new(name), Value::Object(fun_obj));
+
+        // un-register objects
+        self.stack.pop();
+        self.stack.pop();
+    }
+
     pub fn reset(&mut self, function: Function) {
         let function = self.allocate_function(function);
         self.stack = vec![Value::Object(function)];
@@ -232,6 +261,12 @@ impl Vm {
                 });
                 true
             }
+            ObjectRef::NativeFunction(function) => {
+                let result = function.fun()(&self.stack[bp..]);
+                self.stack.truncate(bp);
+                self.stack.push(result);
+                true
+            }
             ObjectRef::Str(_) => {
                 eprintln!("calle must be a function");
                 false
@@ -244,7 +279,9 @@ impl Vm {
         for frame in self.frames.iter().rev() {
             // SAFETY: the frame contains valid pointer to function
             match unsafe { object::as_ref(frame.function) } {
-                ObjectRef::Str(_) => eprintln!("callee is string"),
+                ObjectRef::Str(_) | ObjectRef::NativeFunction(_) => {
+                    eprintln!("callee is not a VM function")
+                }
                 ObjectRef::Function(function) => {
                     // ip is incremented already
                     eprint!(
@@ -266,6 +303,8 @@ impl Vm {
         use OpCode::*;
         use Value::*;
 
+        // TODO: instead of passing references to frame.ip, keep ip on a register
+        // and update it on function call and return as a performance optimization
         loop {
             let frame = match self.frames.last_mut() {
                 Some(frame) => frame,
