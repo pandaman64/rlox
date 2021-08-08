@@ -197,19 +197,55 @@ impl Vm {
         obj
     }
 
-    // SAFETY: function must be valid
-    pub unsafe fn run(&mut self, function: Function) -> InterpretResult {
-        use std::collections::hash_map::Entry;
-        use OpCode::*;
-        use Value::*;
-
-        self.stack = vec![];
+    pub fn reset(&mut self, function: Function) {
         let function = self.allocate_function(function);
+        self.stack = vec![Value::Object(function)];
         self.frames = vec![CallFrame {
             function,
             ip: 0,
             bp: 0,
         }];
+    }
+
+    pub fn call(&mut self, args: u8) -> bool {
+        let bp = self.stack.len() - usize::from(args) - 1;
+        let callee = match self.stack.get(bp) {
+            Some(Value::Object(callee)) => callee,
+            Some(_) => {
+                eprintln!("callee must be an object");
+                return false;
+            }
+            None => {
+                eprintln!("not enough stack for OP_CALL");
+                return false;
+            }
+        };
+        // SAFETY: values in the stack are valid
+        match unsafe { object::as_ref(*callee) } {
+            ObjectRef::Function(function) => {
+                if function.arity() != args {
+                    eprintln!("expected {} arguments but got {}", function.arity(), args);
+                    return false;
+                }
+                self.frames.push(CallFrame {
+                    function: *callee,
+                    ip: 0,
+                    bp,
+                });
+                true
+            }
+            ObjectRef::Str(_) => {
+                eprintln!("calle must be a function");
+                false
+            }
+        }
+    }
+
+    // SAFETY: function must be valid
+    pub unsafe fn run(&mut self) -> InterpretResult {
+        use std::collections::hash_map::Entry;
+        use OpCode::*;
+        use Value::*;
 
         loop {
             let frame = match self.frames.last_mut() {
@@ -453,6 +489,14 @@ impl Vm {
                         }
                     }
                 },
+                Some(Call) => {
+                    let args = function.chunk().code()[frame.ip];
+                    frame.ip += 1;
+
+                    if !self.call(args) {
+                        return InterpretResult::RuntimeError;
+                    }
+                }
             }
         }
     }

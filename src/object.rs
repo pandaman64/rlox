@@ -68,7 +68,7 @@ impl Str {
 #[repr(C)]
 pub struct Function {
     header: Header,
-    arity: u32,
+    arity: u8,
     chunk: Chunk,
     name: Option<InternedStr>,
 }
@@ -86,7 +86,7 @@ impl Function {
         }
     }
 
-    pub fn new_function(name: InternedStr, arity: u32) -> Self {
+    pub fn new_function(name: InternedStr, arity: u8) -> Self {
         Self {
             header: Header {
                 kind: ObjectKind::Function,
@@ -100,6 +100,10 @@ impl Function {
 
     pub fn name(&self) -> Option<InternedStr> {
         self.name
+    }
+
+    pub fn arity(&self) -> u8 {
+        self.arity
     }
 
     pub fn chunk(&self) -> &Chunk {

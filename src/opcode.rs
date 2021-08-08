@@ -31,6 +31,7 @@ pub enum OpCode {
     SetLocal,
     Jump,
     JumpIfFalse,
+    Call,
 }
 
 pub struct Chunk {
@@ -133,6 +134,7 @@ impl Chunk {
             Some(SetLocal) => trace_byte_code(self, offset, "OP_SET_LOCAL"),
             Some(Jump) => trace_jump_code(self, offset, "OP_JUMP"),
             Some(JumpIfFalse) => trace_jump_code(self, offset, "OP_JUMP_IF_FALSE"),
+            Some(Call) => trace_byte_code(self, offset, "OP_CALL"),
         }
     }
 

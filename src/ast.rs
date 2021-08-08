@@ -242,10 +242,44 @@ impl Primary {
 }
 
 #[derive(Debug)]
+pub struct CallExpr {
+    inner: SyntaxNode,
+}
+
+impl CallExpr {
+    fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::CallExprNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn function(&self) -> Option<Expr> {
+        self.inner.children().find_map(Expr::cast)
+    }
+
+    pub fn args(&self) -> impl Iterator<Item = Expr> {
+        self.inner
+            .children()
+            .find_map(|child| {
+                if child.kind() == SyntaxKind::ArgsNode {
+                    Some(child.children().filter_map(Expr::cast))
+                } else {
+                    None
+                }
+            })
+            .into_iter()
+            .flatten()
+    }
+}
+
+#[derive(Debug)]
 pub enum Expr {
     UnaryOp(UnaryOp),
     BinOp(BinOp),
     Primary(Primary),
+    Call(CallExpr),
 }
 
 impl Expr {
@@ -257,6 +291,7 @@ impl Expr {
             UnaryOpNode => Self::UnaryOp(UnaryOp::cast(inner)?),
             BinOpNode => Self::BinOp(BinOp::cast(inner)?),
             PrimaryExprNode => Self::Primary(Primary::cast(inner)?),
+            CallExprNode => Self::Call(CallExpr::cast(inner)?),
             _ => return None,
         })
     }

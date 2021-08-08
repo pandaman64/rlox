@@ -73,7 +73,10 @@ fn main() -> std::io::Result<()> {
         unsafe {
             let function = compiler.finish();
             function.trace();
-            vm.run(function);
+
+            vm.reset(function);
+            vm.call(0);
+            vm.run();
         }
     }
 

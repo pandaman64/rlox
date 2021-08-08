@@ -150,7 +150,29 @@ where
                     self.parse_expr(rbp);
                     self.builder.finish_node();
                 }
-                Some(ParenOpenToken) => todo!("function call"),
+                Some(ParenOpenToken) => {
+                    let lbp = CallLeft;
+                    if lbp < bp {
+                        break;
+                    }
+
+                    self.builder.start_node_at(checkpoint, CallExprNode.into());
+                    self.bump();
+                    self.builder.start_node(ArgsNode.into());
+                    while let Some(next) = self.peek() {
+                        if next == ParenCloseToken {
+                            break;
+                        }
+
+                        self.parse_expr(BindingPower::Zero);
+                        if matches!(self.peek(), Some(CommaToken)) {
+                            self.bump();
+                        }
+                    }
+                    self.builder.finish_node();
+                    self.expect(ParenCloseToken);
+                    self.builder.finish_node();
+                }
                 _ => break,
             }
         }

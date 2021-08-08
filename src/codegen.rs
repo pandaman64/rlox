@@ -1,3 +1,5 @@
+use std::convert::TryFrom;
+
 use crate::{
     ast::{
         BinOpKind, BlockStmt, Decl, Expr, ForInit, Identifier, Primary, Stmt, UnaryOpKind, VarDecl,
@@ -37,17 +39,17 @@ impl<'parent> Compiler<'parent> {
             function: Function::new_script(),
             kind: FunctionKind::Script,
             locals: vec![
-                // used by compiler
-                // Local {
-                //     ident: "".into(),
-                //     depth: 0,
-                // },
+                // This corresponds to the caller of the top-level script
+                Local {
+                    ident: "<top-level script>".into(),
+                    depth: 0,
+                },
             ],
             block_depth: 0,
         }
     }
 
-    fn new_function(parent: &'parent Compiler<'parent>, name: InternedStr, arity: u32) -> Self {
+    fn new_function(parent: &'parent Compiler<'parent>, name: InternedStr, arity: u8) -> Self {
         Self {
             parent: Some(parent),
             function: Function::new_function(name, arity),
@@ -285,6 +287,19 @@ impl<'parent> Compiler<'parent> {
                     self.chunk_mut().push_code(index, 0);
                 }
             },
+            Expr::Call(expr) => {
+                self.gen_expr(vm, expr.function().unwrap());
+                let mut args = 0;
+                for arg in expr.args() {
+                    self.gen_expr(vm, arg);
+                    args += 1;
+                }
+                self.chunk_mut().push_code(OpCode::Call as _, 0);
+                self.chunk_mut().push_code(
+                    u8::try_from(args).expect("function call cannot have more than 255 arguments"),
+                    0,
+                );
+            }
         }
     }
 
@@ -405,11 +420,6 @@ impl<'parent> Compiler<'parent> {
     where
         F: FnOnce(&mut Self, &mut Vm),
     {
-        eprintln!(
-            "ident = {}, block_depth = {}",
-            ident.to_str(),
-            self.block_depth
-        );
         if self.block_depth > GLOBAL_BLOCK {
             let idx = self.locals.len();
             self.push_local(ident.to_str());
@@ -442,7 +452,8 @@ impl<'parent> Compiler<'parent> {
             Decl::FunDecl(decl) => {
                 let name = decl.ident().unwrap();
                 let name = vm.allocate_string(name.to_str().into());
-                let arity = decl.params().count() as u32;
+                let arity = u8::try_from(decl.params().count())
+                    .expect("function cannot have more than 255 arguments");
                 let mut compiler = Compiler::new_function(self, name, arity);
                 compiler.begin_block();
                 for param in decl.params() {

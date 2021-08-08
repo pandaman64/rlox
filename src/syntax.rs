@@ -101,6 +101,8 @@ pub enum SyntaxKind {
     UnaryOpNode,
     BinOpNode,
     PrimaryExprNode,
+    ArgsNode,
+    CallExprNode,
     ExprNode,
 
     // declarations
