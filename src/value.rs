@@ -1,7 +1,7 @@
 use core::fmt;
 use std::ptr;
 
-use crate::object::{self, RawObject};
+use crate::object::{self, ObjectRef, RawObject};
 
 // we intentionally omit Copy so that cloning values is more explicit
 #[derive(Debug, Clone)]
@@ -43,7 +43,9 @@ impl Value {
             Number(num) => ValueDisplay::Number(*num),
             Object(obj) => {
                 // SAFETY: this object is valid, so the type must match the runtime representation
-                unsafe { ValueDisplay::Object(&object::try_as_str(obj).unwrap().content) }
+                match unsafe { object::as_ref(*obj) } {
+                    ObjectRef::Str(str) => ValueDisplay::Object(str.as_rust_str()),
+                }
             }
         }
     }
@@ -58,10 +60,9 @@ impl Value {
             (Number(n1), Number(n2)) => n1 == n2,
             (Object(o1), Object(o2)) => {
                 // SAFETY: these objects are valid
-                match unsafe { (object::try_as_str(o1), object::try_as_str(o2)) } {
+                match unsafe { (object::as_ref(*o1), object::as_ref(*o2)) } {
                     // strings are interned
-                    (Some(_), Some(_)) => ptr::eq(o1.as_ptr(), o2.as_ptr()),
-                    _ => false,
+                    (ObjectRef::Str(_), ObjectRef::Str(_)) => ptr::eq(o1.as_ptr(), o2.as_ptr()),
                 }
             }
             _ => false,

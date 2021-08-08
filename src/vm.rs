@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    object::{self, ObjectKind, RawObject, RawStr},
+    object::{self, ObjectKind, ObjectRef, RawObject, RawStr},
     opcode::{Chunk, OpCode},
     table::{InternedStr, Key},
     trace_available,
@@ -365,16 +365,15 @@ impl Vm {
                             let o1 = try_pop!(self, Object);
 
                             // SAFETY: these objects are valid
-                            match unsafe { (object::try_as_str(&o1), object::try_as_str(&o2)) } {
-                                (Some(o1), Some(o2)) => {
-                                    let result = o1.content.clone() + &o2.content;
+                            match unsafe { (object::as_ref(o1), object::as_ref(o2)) } {
+                                (ObjectRef::Str(o1), ObjectRef::Str(o2)) => {
+                                    let result = o1.as_rust_str().to_string() + o2.as_rust_str();
                                     let obj = self.allocate_string(result);
                                     self.stack.push(Value::Object(obj.into_raw_obj()));
-                                }
-                                _ => {
-                                    eprintln!("type mismatch in addition");
-                                    return InterpretResult::RuntimeError;
-                                }
+                                } // _ => {
+                                  //     eprintln!("type mismatch in addition");
+                                  //     return InterpretResult::RuntimeError;
+                                  // }
                             }
                         }
                         [Number(_), Number(_)] => {

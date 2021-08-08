@@ -16,11 +16,29 @@ pub struct Header {
     pub next: Option<RawObject>,
 }
 
+pub enum ObjectRef<'a> {
+    Str(&'a Str),
+}
+
+/// SAFETY: the object must be initialized and its kind must match the runtime representation.
+pub unsafe fn as_ref<'a>(obj: RawObject) -> ObjectRef<'a> {
+    unsafe {
+        let obj = obj.as_ptr();
+        let kind_ptr = ptr::addr_of_mut!((*obj).kind);
+        match ptr::read(kind_ptr) {
+            ObjectKind::String => {
+                let str_ptr = obj as *mut Str;
+                ObjectRef::Str(str_ptr.as_ref().unwrap())
+            }
+        }
+    }
+}
+
 // TODO: inline string contents to shave off one allocation
 #[repr(C)]
 pub struct Str {
-    pub header: Header,
-    pub content: String,
+    header: Header,
+    content: String,
 }
 
 impl Str {
@@ -33,18 +51,8 @@ impl Str {
             content,
         }
     }
-}
 
-/// SAFETY: the object must be initialized and its kind must match the runtime representation.
-pub unsafe fn try_as_str(obj: &RawObject) -> Option<&Str> {
-    unsafe {
-        let obj = obj.as_ptr();
-        let kind_ptr = ptr::addr_of_mut!((*obj).kind);
-        match ptr::read(kind_ptr) {
-            ObjectKind::String => {
-                let str_ptr = obj as *mut Str;
-                Some(str_ptr.as_ref().unwrap())
-            }
-        }
+    pub fn as_rust_str(&self) -> &String {
+        &self.content
     }
 }

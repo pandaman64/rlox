@@ -12,8 +12,8 @@ impl PartialEq for InternedStr {
     fn eq(&self, other: &Self) -> bool {
         // SAFETY: the construction of InternedStr guarantees the validity of pointee
         unsafe {
-            let s1 = &self.0.as_ref().content;
-            let s2 = &other.0.as_ref().content;
+            let s1 = &self.0.as_ref().as_rust_str();
+            let s2 = &other.0.as_ref().as_rust_str();
 
             s1.eq(s2)
         }
@@ -25,7 +25,7 @@ impl Hash for InternedStr {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // SAFETY: the construction of InternedStr guarantees the validity of pointee
         unsafe {
-            let s = &self.0.as_ref().content;
+            let s = &self.0.as_ref().as_rust_str();
             s.hash(state);
         }
     }
@@ -57,6 +57,6 @@ impl Key {
 
     pub fn display(&self) -> impl fmt::Display + '_ {
         // SAFETY: the construction of InternedStr guarantees the validity
-        unsafe { &self.0.as_ref().content }
+        unsafe { self.0.as_ref().as_rust_str() }
     }
 }
