@@ -16,7 +16,9 @@ enum ValueDisplay<'v> {
     Nil,
     Bool(bool),
     Number(f64),
-    Object(&'v (dyn fmt::Display + 'v)),
+    Str(&'v str),
+    Script,
+    Function(Value),
 }
 
 impl fmt::Display for ValueDisplay<'_> {
@@ -27,7 +29,10 @@ impl fmt::Display for ValueDisplay<'_> {
             Nil => write!(f, "nil"),
             Bool(b) => write!(f, "{}", b),
             Number(num) => write!(f, "{}", num),
-            Object(obj) => write!(f, "{}", obj),
+            Str(s) => write!(f, "{}", s),
+            Script => write!(f, "<top-level script>"),
+            // SAFETY: construction of ValueDisplay guarantees the validity of the object
+            Function(name) => write!(f, "<fn {}>", unsafe { name.format_args() }),
         }
     }
 }
@@ -35,18 +40,28 @@ impl fmt::Display for ValueDisplay<'_> {
 impl Value {
     /// SAFETY: `self` must be a valid object (initialized and not freed).
     pub unsafe fn format_args(&self) -> impl fmt::Display + '_ {
+        /// SAFETY: `obj` must be a (recursively) valid object.
+        unsafe fn format_obj<'obj>(obj: RawObject) -> ValueDisplay<'obj> {
+            // SAFETY: this object is valid, so the type must match the runtime representation
+            match unsafe { object::as_ref(obj) } {
+                ObjectRef::Str(str) => ValueDisplay::Str(str.as_rust_str()),
+                ObjectRef::Function(fun) => match fun.name() {
+                    None => ValueDisplay::Script,
+                    // SAFETY: the object must be recursively valid.
+                    Some(name) => ValueDisplay::Function(Value::Object(name)),
+                },
+            }
+        }
         use Value::*;
 
         match self {
             Nil => ValueDisplay::Nil,
             Bool(b) => ValueDisplay::Bool(*b),
             Number(num) => ValueDisplay::Number(*num),
-            Object(obj) => {
-                // SAFETY: this object is valid, so the type must match the runtime representation
-                match unsafe { object::as_ref(*obj) } {
-                    ObjectRef::Str(str) => ValueDisplay::Object(str.as_rust_str()),
-                }
-            }
+            Object(obj) => unsafe {
+                // SAFETY: this object is valid
+                format_obj(*obj)
+            },
         }
     }
 
@@ -63,6 +78,11 @@ impl Value {
                 match unsafe { (object::as_ref(*o1), object::as_ref(*o2)) } {
                     // strings are interned
                     (ObjectRef::Str(_), ObjectRef::Str(_)) => ptr::eq(o1.as_ptr(), o2.as_ptr()),
+                    // functions are equal iff they point to the same function object
+                    (ObjectRef::Function(_), ObjectRef::Function(_)) => {
+                        ptr::eq(o1.as_ptr(), o2.as_ptr())
+                    }
+                    _ => false,
                 }
             }
             _ => false,

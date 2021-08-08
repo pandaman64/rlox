@@ -114,9 +114,13 @@ impl Vm {
                 // we assume that runtime type of the values are correct, so that we can cast back
                 // to the original types and deallocate them here.
                 match ptr::read(kind_ptr) {
-                    ObjectKind::String => {
+                    ObjectKind::Str => {
                         let str_ptr = obj_ptr as *mut object::Str;
                         drop(Box::from_raw(str_ptr));
+                    }
+                    ObjectKind::Function => {
+                        let fun_ptr = obj_ptr as *mut object::Function;
+                        drop(Box::from_raw(fun_ptr));
                     }
                 }
             }
@@ -161,12 +165,13 @@ impl Vm {
                     // SAFETY: obj points to a valid constant value
                     let kind = ptr::read(kind_ptr);
                     match kind {
-                        ObjectKind::String => {
+                        ObjectKind::Str => {
                             let str_ptr = obj_ptr as *mut object::Str;
                             let str_ptr = RawStr::new(str_ptr).unwrap();
                             // SAFETY: we intern all string appears in the program execution
                             Some(Key::new(InternedStr::new(str_ptr)))
                         }
+                        ObjectKind::Function => unreachable!("key must be string"),
                     }
                 }
             }
@@ -370,10 +375,11 @@ impl Vm {
                                     let result = o1.as_rust_str().to_string() + o2.as_rust_str();
                                     let obj = self.allocate_string(result);
                                     self.stack.push(Value::Object(obj.into_raw_obj()));
-                                } // _ => {
-                                  //     eprintln!("type mismatch in addition");
-                                  //     return InterpretResult::RuntimeError;
-                                  // }
+                                }
+                                _ => {
+                                    eprintln!("type mismatch in addition");
+                                    return InterpretResult::RuntimeError;
+                                }
                             }
                         }
                         [Number(_), Number(_)] => {
