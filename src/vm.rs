@@ -56,7 +56,7 @@ macro_rules! binop {
 
 struct CallFrame {
     function: RawObject,
-    // the ip to which we jump after executing this function
+    // the ip for this function
     ip: usize,
     // the base pointer from which the local variables of this function start
     bp: usize,
@@ -69,7 +69,6 @@ pub enum InterpretResult {
 }
 
 pub struct Vm {
-    ip: usize,
     stack: Vec<Value>,
     frames: Vec<CallFrame>,
     objects: Option<RawObject>,
@@ -77,10 +76,40 @@ pub struct Vm {
     globals: HashMap<Key, Value>,
 }
 
+fn extract_constant(ip: &mut usize, chunk: &Chunk) -> Value {
+    let index = usize::from(chunk.code()[*ip]);
+    *ip += 1;
+    chunk.constants()[index].clone()
+}
+
+fn extract_constant_key(ip: &mut usize, chunk: &Chunk) -> Option<Key> {
+    let ident = extract_constant(ip, chunk);
+    match ident {
+        Value::Object(obj) => {
+            unsafe {
+                let obj_ptr = obj.as_ptr();
+                // SAFETY: obj points to a valid constant value
+                let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
+                // SAFETY: obj points to a valid constant value
+                let kind = ptr::read(kind_ptr);
+                match kind {
+                    ObjectKind::Str => {
+                        let str_ptr = obj_ptr as *mut object::Str;
+                        let str_ptr = RawStr::new(str_ptr).unwrap();
+                        // SAFETY: we intern all string appears in the program execution
+                        Some(Key::new(InternedStr::new(str_ptr)))
+                    }
+                    ObjectKind::Function => unreachable!("key must be string"),
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
 impl Vm {
     pub fn new() -> Self {
         Self {
-            ip: 0,
             stack: vec![],
             frames: vec![],
             objects: None,
@@ -158,44 +187,12 @@ impl Vm {
         }
     }
 
-    fn extract_constant(&mut self, chunk: &Chunk) -> Value {
-        let index = usize::from(chunk.code()[self.ip]);
-        self.ip += 1;
-        chunk.constants()[index].clone()
-    }
-
-    fn extract_constant_key(&mut self, chunk: &Chunk) -> Option<Key> {
-        let ident = self.extract_constant(chunk);
-        match ident {
-            Value::Object(obj) => {
-                unsafe {
-                    let obj_ptr = obj.as_ptr();
-                    // SAFETY: obj points to a valid constant value
-                    let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
-                    // SAFETY: obj points to a valid constant value
-                    let kind = ptr::read(kind_ptr);
-                    match kind {
-                        ObjectKind::Str => {
-                            let str_ptr = obj_ptr as *mut object::Str;
-                            let str_ptr = RawStr::new(str_ptr).unwrap();
-                            // SAFETY: we intern all string appears in the program execution
-                            Some(Key::new(InternedStr::new(str_ptr)))
-                        }
-                        ObjectKind::Function => unreachable!("key must be string"),
-                    }
-                }
-            }
-            _ => None,
-        }
-    }
-
     // SAFETY: function must be valid
     pub unsafe fn run(&mut self, function: Function) -> InterpretResult {
         use std::collections::hash_map::Entry;
         use OpCode::*;
         use Value::*;
 
-        self.ip = 0;
         self.stack = vec![];
         let function = {
             let obj_ptr = Box::into_raw(Box::new(function));
@@ -206,12 +203,12 @@ impl Vm {
         }
         self.frames = vec![CallFrame {
             function,
-            ip: usize::MAX,
+            ip: 0,
             bp: 0,
         }];
 
         loop {
-            let frame = match self.frames.last() {
+            let frame = match self.frames.last_mut() {
                 Some(frame) => frame,
                 None => {
                     eprintln!("no call frame to execute");
@@ -239,12 +236,12 @@ impl Vm {
                     eprintln!();
 
                     // print current instruction
-                    chunk.trace_code(self.ip);
+                    chunk.trace_code(frame.ip);
                 }
             }
 
-            let instruction = chunk.code()[self.ip];
-            self.ip += 1;
+            let instruction = chunk.code()[frame.ip];
+            frame.ip += 1;
             match OpCode::from_u8(instruction) {
                 None => return InterpretResult::CompileError,
                 Some(Return) => {
@@ -265,11 +262,11 @@ impl Vm {
                     }
                 }
                 Some(Constant) => {
-                    let constant = self.extract_constant(chunk);
+                    let constant = extract_constant(&mut frame.ip, chunk);
                     self.stack.push(constant);
                 }
                 Some(DefineGlobal) => {
-                    let key = match self.extract_constant_key(chunk) {
+                    let key = match extract_constant_key(&mut frame.ip, chunk) {
                         Some(key) => key,
                         None => {
                             eprintln!("OP_DEFINE_GLOBAL takes a string constant");
@@ -291,7 +288,7 @@ impl Vm {
                     self.stack.pop();
                 }
                 Some(GetGlobal) => {
-                    let key = match self.extract_constant_key(chunk) {
+                    let key = match extract_constant_key(&mut frame.ip, chunk) {
                         Some(key) => key,
                         None => {
                             eprintln!("OP_GET_GLOBAL takes a string constant");
@@ -308,7 +305,7 @@ impl Vm {
                     self.stack.push(value.clone());
                 }
                 Some(SetGlobal) => {
-                    let key = match self.extract_constant_key(chunk) {
+                    let key = match extract_constant_key(&mut frame.ip, chunk) {
                         Some(key) => key,
                         None => {
                             eprintln!("OP_SET_GLOBAL takes a string constant");
@@ -333,13 +330,13 @@ impl Vm {
                     }
                 }
                 Some(GetLocal) => {
-                    let local = usize::from(chunk.code()[self.ip]);
-                    self.ip += 1;
+                    let local = frame.bp + usize::from(chunk.code()[frame.ip]);
+                    frame.ip += 1;
                     self.stack.push(self.stack[local].clone());
                 }
                 Some(SetLocal) => {
-                    let local = usize::from(chunk.code()[self.ip]);
-                    self.ip += 1;
+                    let local = frame.bp + usize::from(chunk.code()[frame.ip]);
+                    frame.ip += 1;
                     match self.stack.last().cloned() {
                         None => {
                             eprintln!("empty stack for OP_SET_LOCAL");
@@ -435,8 +432,8 @@ impl Vm {
                 Some(Multiply) => binop!(self, Number, *, Number),
                 Some(Divide) => binop!(self, Number, /, Number),
                 Some(Jump) => {
-                    let diff = chunk.read_jump_location(self.ip);
-                    self.ip = (self.ip as isize + isize::from(diff)) as usize;
+                    let diff = chunk.read_jump_location(frame.ip);
+                    frame.ip = (frame.ip as isize + isize::from(diff)) as usize;
                 }
                 Some(JumpIfFalse) => match self.stack.last() {
                     None => {
@@ -445,10 +442,10 @@ impl Vm {
                     }
                     Some(v) => {
                         if v.is_falsy() {
-                            let diff = chunk.read_jump_location(self.ip);
-                            self.ip = (self.ip as isize + isize::from(diff)) as usize;
+                            let diff = chunk.read_jump_location(frame.ip);
+                            frame.ip = (frame.ip as isize + isize::from(diff)) as usize;
                         } else {
-                            self.ip += 2;
+                            frame.ip += 2;
                         }
                     }
                 },

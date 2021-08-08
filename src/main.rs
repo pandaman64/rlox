@@ -38,7 +38,7 @@ pub fn trace_available() -> bool {
 fn main() -> std::io::Result<()> {
     use std::io::Write;
 
-    std::env::set_var("RUST_LOG", "trace");
+    // std::env::set_var("RUST_LOG", "trace");
 
     let mut line = String::new();
     let stdin = std::io::stdin();
