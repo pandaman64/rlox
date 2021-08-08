@@ -44,6 +44,11 @@ impl InternedStr {
     pub fn into_raw_obj(self) -> RawObject {
         self.0.cast()
     }
+
+    pub fn display(&self) -> impl fmt::Display + '_ {
+        // SAFETY: the construction of InternedStr guarantees the validity
+        unsafe { self.0.as_ref().as_rust_str() }
+    }
 }
 
 // interned keys that can be compared with pointer values

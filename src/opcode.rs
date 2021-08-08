@@ -156,6 +156,10 @@ impl Chunk {
         &self.code
     }
 
+    pub fn line(&self) -> &[usize] {
+        &self.line
+    }
+
     pub fn constants(&self) -> &[Value] {
         &self.constants
     }

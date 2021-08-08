@@ -19,7 +19,7 @@ use std::{
 };
 use vm::Vm;
 
-use crate::{ast::Root, codegen::Compiler};
+use crate::{ast::Root, codegen::Compiler, vm::InterpretResult};
 
 pub fn trace_available() -> bool {
     static AVAILABLE: AtomicBool = AtomicBool::new(false);
@@ -76,7 +76,9 @@ fn main() -> std::io::Result<()> {
 
             vm.reset(function);
             vm.call(0);
-            vm.run();
+            if vm.run() != InterpretResult::Ok {
+                vm.print_stack_trace();
+            }
         }
     }
 

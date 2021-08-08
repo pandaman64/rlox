@@ -62,6 +62,8 @@ struct CallFrame {
     bp: usize,
 }
 
+#[must_use]
+#[derive(PartialEq, Eq)]
 pub enum InterpretResult {
     Ok,
     CompileError,
@@ -200,11 +202,7 @@ impl Vm {
     pub fn reset(&mut self, function: Function) {
         let function = self.allocate_function(function);
         self.stack = vec![Value::Object(function)];
-        self.frames = vec![CallFrame {
-            function,
-            ip: 0,
-            bp: 0,
-        }];
+        self.frames = vec![];
     }
 
     pub fn call(&mut self, args: u8) -> bool {
@@ -241,7 +239,28 @@ impl Vm {
         }
     }
 
-    // SAFETY: function must be valid
+    /// SAFETY: stack and frames must be valid
+    pub unsafe fn print_stack_trace(&self) {
+        for frame in self.frames.iter().rev() {
+            // SAFETY: the frame contains valid pointer to function
+            match unsafe { object::as_ref(frame.function) } {
+                ObjectRef::Str(_) => eprintln!("callee is string"),
+                ObjectRef::Function(function) => {
+                    // ip is incremented already
+                    eprint!(
+                        "while evaluating line {}, ",
+                        function.chunk().line()[frame.ip - 1]
+                    );
+                    match function.name() {
+                        Some(name) => eprintln!("function {}", name.display()),
+                        None => eprintln!("top-level script"),
+                    }
+                }
+            }
+        }
+    }
+
+    /// SAFETY: stack and frames must be valid
     pub unsafe fn run(&mut self) -> InterpretResult {
         use std::collections::hash_map::Entry;
         use OpCode::*;
