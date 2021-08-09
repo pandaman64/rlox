@@ -3,7 +3,11 @@ use num_derive::{FromPrimitive, ToPrimitive};
 
 use std::{convert::TryFrom, fmt};
 
-use crate::{trace_available, value::Value};
+use crate::{
+    object::{self, ObjectRef},
+    trace_available,
+    value::Value,
+};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromPrimitive, ToPrimitive)]
@@ -12,6 +16,7 @@ pub enum OpCode {
     True,
     False,
     Constant,
+    Closure,
     Pop,
     Negate,
     Not,
@@ -29,6 +34,8 @@ pub enum OpCode {
     SetGlobal,
     GetLocal,
     SetLocal,
+    GetUpvalue,
+    SetUpvalue,
     Jump,
     JumpIfFalse,
     Call,
@@ -106,6 +113,42 @@ impl Chunk {
                 // SAFETY: constants in this chunk are valid
                 unsafe { trace_constant_code(self, offset, "OP_CONSTANT") }
             }
+            Some(Closure) => {
+                let mut offset = offset + 1;
+                let constant_index = usize::from(self.code[offset]);
+                let constant = &self.constants[constant_index];
+                eprintln!("{:-16} {:4} '{}'", "OP_CLOSURE", constant_index, unsafe {
+                    constant.format_args()
+                });
+
+                // SAFETY: constants and generated code are valid
+                unsafe {
+                    match constant {
+                        Value::Object(obj) => match object::as_ref(*obj) {
+                            ObjectRef::Function(function) => {
+                                for _ in 0..function.upvalues() {
+                                    let is_local = if self.code[offset + 1] > 0 {
+                                        "local"
+                                    } else {
+                                        "upvalue"
+                                    };
+                                    let index = self.code[offset + 2];
+                                    eprintln!(
+                                        "{:04}      |                     {} {}",
+                                        offset - 2,
+                                        is_local,
+                                        index
+                                    );
+                                    offset += 2;
+                                }
+                            }
+                            _ => unreachable!(),
+                        },
+                        _ => unreachable!(),
+                    }
+                }
+                offset
+            }
             Some(Pop) => trace_simple_code(offset, "OP_POP"),
             Some(Negate) => trace_simple_code(offset, "OP_NEGATE"),
             Some(Not) => trace_simple_code(offset, "OP_NOT"),
@@ -132,6 +175,8 @@ impl Chunk {
             }
             Some(GetLocal) => trace_byte_code(self, offset, "OP_GET_LOCAL"),
             Some(SetLocal) => trace_byte_code(self, offset, "OP_SET_LOCAL"),
+            Some(GetUpvalue) => trace_byte_code(self, offset, "OP_GET_UPVALUE"),
+            Some(SetUpvalue) => trace_byte_code(self, offset, "OP_SET_UPVALUE"),
             Some(Jump) => trace_jump_code(self, offset, "OP_JUMP"),
             Some(JumpIfFalse) => trace_jump_code(self, offset, "OP_JUMP_IF_FALSE"),
             Some(Call) => trace_byte_code(self, offset, "OP_CALL"),

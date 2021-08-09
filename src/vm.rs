@@ -5,7 +5,10 @@ use std::{
 };
 
 use crate::{
-    object::{self, Function, NativeFunction, ObjectKind, ObjectRef, RawObject, RawStr},
+    object::{
+        self, Closure, Function, NativeFunction, ObjectKind, ObjectRef, RawClosure, RawObject,
+        RawStr, RawUpvalue, Upvalue,
+    },
     opcode::{Chunk, OpCode},
     table::{InternedStr, Key},
     trace_available,
@@ -55,7 +58,7 @@ macro_rules! binop {
 }
 
 struct CallFrame {
-    function: RawObject,
+    closure: RawClosure,
     // the ip for this function
     ip: usize,
     // the base pointer from which the local variables of this function start
@@ -70,53 +73,16 @@ pub enum InterpretResult {
     RuntimeError,
 }
 
-pub struct Vm {
-    stack: Vec<Value>,
-    frames: Vec<CallFrame>,
-    objects: Option<RawObject>,
+pub struct Objects {
+    head: Option<RawObject>,
     strings: HashSet<InternedStr>,
     globals: HashMap<Key, Value>,
 }
 
-fn extract_constant(ip: &mut usize, chunk: &Chunk) -> Value {
-    let index = usize::from(chunk.code()[*ip]);
-    *ip += 1;
-    chunk.constants()[index].clone()
-}
-
-fn extract_constant_key(ip: &mut usize, chunk: &Chunk) -> Option<Key> {
-    let ident = extract_constant(ip, chunk);
-    match ident {
-        Value::Object(obj) => {
-            unsafe {
-                let obj_ptr = obj.as_ptr();
-                // SAFETY: obj points to a valid constant value
-                let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
-                // SAFETY: obj points to a valid constant value
-                let kind = ptr::read(kind_ptr);
-                match kind {
-                    ObjectKind::Str => {
-                        let str_ptr = obj_ptr as *mut object::Str;
-                        let str_ptr = RawStr::new(str_ptr).unwrap();
-                        // SAFETY: we intern all string appears in the program execution
-                        Some(Key::new(InternedStr::new(str_ptr)))
-                    }
-                    ObjectKind::Function | ObjectKind::NativeFunction => {
-                        unreachable!("key must be string")
-                    }
-                }
-            }
-        }
-        _ => None,
-    }
-}
-
-impl Vm {
-    pub fn new() -> Self {
+impl Objects {
+    fn new() -> Self {
         Self {
-            stack: vec![],
-            frames: vec![],
-            objects: None,
+            head: None,
             strings: HashSet::new(),
             globals: HashMap::new(),
         }
@@ -130,9 +96,9 @@ impl Vm {
             let obj_ptr = obj.as_ptr();
             let next_ptr = ptr::addr_of_mut!((*obj_ptr).next);
             assert!(ptr::read(next_ptr).is_none());
-            ptr::write(next_ptr, self.objects);
+            ptr::write(next_ptr, self.head);
 
-            self.objects = Some(obj);
+            self.head = Some(obj);
         }
     }
 
@@ -141,35 +107,11 @@ impl Vm {
         self.strings.clear();
         self.globals.clear();
 
-        while let Some(obj) = { self.objects } {
+        while let Some(obj) = { self.head } {
             // SAFETY: self.objects points to an initialized object and covers the whole allocation
             // in an type-safe manner. this property must be guaranteed by allocation methods.
             unsafe {
-                // since we carefully avoid using references in this implementation, all pointers
-                // declared here should share the same permission for accessing the object `obj`
-                // points to. moreover, obj_ptr should have the right provenance for the whole
-                // object, not only for the header.
-                let obj_ptr = obj.as_ptr();
-                let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
-                let next_ptr = ptr::addr_of_mut!((*obj_ptr).next);
-                self.objects = ptr::read(next_ptr);
-
-                // we assume that runtime type of the values are correct, so that we can cast back
-                // to the original types and deallocate them here.
-                match ptr::read(kind_ptr) {
-                    ObjectKind::Str => {
-                        let str_ptr = obj_ptr as *mut object::Str;
-                        drop(Box::from_raw(str_ptr));
-                    }
-                    ObjectKind::Function => {
-                        let fun_ptr = obj_ptr as *mut object::Function;
-                        drop(Box::from_raw(fun_ptr));
-                    }
-                    ObjectKind::NativeFunction => {
-                        let fun_ptr = obj_ptr as *mut object::NativeFunction;
-                        drop(Box::from_raw(fun_ptr));
-                    }
-                }
+                self.head = free_object(obj);
             }
         }
     }
@@ -196,8 +138,7 @@ impl Vm {
     }
 
     pub fn allocate_function(&mut self, function: Function) -> RawObject {
-        let fun_ptr = Box::into_raw(Box::new(function));
-        let obj = RawObject::new(fun_ptr as _).unwrap();
+        let obj = allocate_object(function);
         // SAFETY: obj points to a valid object
         unsafe {
             self.add_object_head(obj);
@@ -205,14 +146,123 @@ impl Vm {
         obj
     }
 
+    pub fn allocate_closure(&mut self, closure: Closure) -> RawClosure {
+        let obj = allocate_object(closure);
+        // SAFETY: obj points to a valid object
+        unsafe {
+            self.add_object_head(obj);
+        }
+        obj.cast()
+    }
+
+    pub fn allocate_upvalue(&mut self, upvalue: Upvalue) -> RawUpvalue {
+        let obj = allocate_object(upvalue);
+        // SAFETY: obj points to a valid object
+        unsafe {
+            self.add_object_head(obj);
+        }
+        obj.cast()
+    }
+}
+
+pub struct Vm {
+    stack: Vec<Value>,
+    frames: Vec<CallFrame>,
+    objects: Objects,
+}
+
+fn extract_constant(ip: &mut usize, chunk: &Chunk) -> Value {
+    let index = usize::from(chunk.code()[*ip]);
+    *ip += 1;
+    chunk.constants()[index].clone()
+}
+
+fn extract_constant_key(ip: &mut usize, chunk: &Chunk) -> Option<Key> {
+    let ident = extract_constant(ip, chunk);
+    match ident {
+        Value::Object(obj) => {
+            unsafe {
+                let obj_ptr = obj.as_ptr();
+                // SAFETY: obj points to a valid constant value
+                let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
+                // SAFETY: obj points to a valid constant value
+                let kind = ptr::read(kind_ptr);
+                match kind {
+                    ObjectKind::Str => {
+                        let str_ptr = obj_ptr as *mut object::Str;
+                        let str_ptr = RawStr::new(str_ptr).unwrap();
+                        // SAFETY: we intern all string appears in the program execution
+                        Some(Key::new(InternedStr::new(str_ptr)))
+                    }
+                    _ => {
+                        unreachable!("key must be string")
+                    }
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
+fn allocate_object<T>(obj: T) -> RawObject {
+    let obj_ptr = Box::into_raw(Box::new(obj));
+    RawObject::new(obj_ptr as _).unwrap()
+}
+
+/// SAFETY: obj must be valid and allocated by allocate_object
+unsafe fn free_object(obj: RawObject) -> Option<RawObject> {
+    unsafe {
+        // SAFETY:
+        // since we carefully avoid using references in this implementation, all pointers
+        // declared here should share the same permission for accessing the object `obj`
+        // points to. moreover, obj_ptr should have the right provenance for the whole
+        // object, not only for the header.
+        let obj_ptr = obj.as_ptr();
+        let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
+        let next_ptr = ptr::addr_of_mut!((*obj_ptr).next);
+        let next = ptr::read(next_ptr);
+
+        // SAFETY:
+        // we assume that runtime type of the values are correct, so that we can cast back
+        // to the original types and deallocate them here.
+        macro_rules! free {
+            ($ptr:expr, $ty:ty) => {{
+                let ptr = $ptr as *mut $ty;
+                drop(Box::from_raw(ptr));
+            }};
+        }
+        match ptr::read(kind_ptr) {
+            ObjectKind::Str => free!(obj_ptr, object::Str),
+            ObjectKind::Function => free!(obj_ptr, object::Function),
+            ObjectKind::NativeFunction => free!(obj_ptr, object::NativeFunction),
+            ObjectKind::Closure => free!(obj_ptr, object::Closure),
+            ObjectKind::Upvalue => free!(obj_ptr, object::Upvalue),
+        }
+
+        next
+    }
+}
+
+impl Vm {
+    pub fn new() -> Self {
+        Self {
+            stack: vec![],
+            frames: vec![],
+            objects: Objects::new(),
+        }
+    }
+
+    pub fn objects_mut(&mut self) -> &mut Objects {
+        &mut self.objects
+    }
+
     pub fn define_native_function(&mut self, name: String, function: NativeFunction) {
-        let name = self.allocate_string(name);
+        let name = self.objects.allocate_string(name);
         let fun_obj = {
-            let fun_ptr = Box::into_raw(Box::new(function));
-            let fun_obj = RawObject::new(fun_ptr as _).unwrap();
+            let fun_obj = allocate_object(function);
             // SAFETY: obj points to a valid object
             unsafe {
-                self.add_object_head(fun_obj);
+                self.objects.add_object_head(fun_obj);
             }
             fun_obj
         };
@@ -221,7 +271,9 @@ impl Vm {
         self.stack.push(Value::Object(name.into_raw_obj()));
         self.stack.push(Value::Object(fun_obj));
 
-        self.globals.insert(Key::new(name), Value::Object(fun_obj));
+        self.objects
+            .globals
+            .insert(Key::new(name), Value::Object(fun_obj));
 
         // un-register objects
         self.stack.pop();
@@ -229,14 +281,14 @@ impl Vm {
     }
 
     pub fn reset(&mut self, function: Function) {
-        let function = self.allocate_function(function);
+        let function = self.objects.allocate_function(function);
         self.stack = vec![Value::Object(function)];
         self.frames = vec![];
     }
 
     pub fn call(&mut self, args: u8) -> bool {
         let bp = self.stack.len() - usize::from(args) - 1;
-        let callee = match self.stack.get(bp) {
+        let callee = *match self.stack.get(bp) {
             Some(Value::Object(callee)) => callee,
             Some(_) => {
                 eprintln!("callee must be an object");
@@ -248,14 +300,22 @@ impl Vm {
             }
         };
         // SAFETY: values in the stack are valid
-        match unsafe { object::as_ref(*callee) } {
-            ObjectRef::Function(function) => {
-                if function.arity() != args {
-                    eprintln!("expected {} arguments but got {}", function.arity(), args);
-                    return false;
+        match unsafe { object::as_ref(callee) } {
+            ObjectRef::Closure(closure) => {
+                // SAFETY: `function` is a reference to the function object derived by `closure.function`.
+                // since we assume that our GC keeps values reachable from the stack valid, accessing
+                // function is safe. moreover, the `function` and `closure` references dies before
+                // the later use of callee, which satisfies Stacked Borrows.
+                unsafe {
+                    let function = closure.function().as_ref();
+                    if function.arity() != args {
+                        eprintln!("expected {} arguments but got {}", function.arity(), args);
+                        return false;
+                    }
                 }
                 self.frames.push(CallFrame {
-                    function: *callee,
+                    // make sure that `closure` will share the same permission as `callee`.
+                    closure: callee.cast(),
                     ip: 0,
                     bp,
                 });
@@ -267,8 +327,12 @@ impl Vm {
                 self.stack.push(result);
                 true
             }
-            ObjectRef::Str(_) => {
-                eprintln!("calle must be a function");
+            ObjectRef::Function(_function) => {
+                eprintln!("cannot call bare function");
+                false
+            }
+            ObjectRef::Str(_) | ObjectRef::Upvalue(_) => {
+                eprintln!("callee must be a function");
                 false
             }
         }
@@ -277,21 +341,19 @@ impl Vm {
     /// SAFETY: stack and frames must be valid
     pub unsafe fn print_stack_trace(&self) {
         for frame in self.frames.iter().rev() {
-            // SAFETY: the frame contains valid pointer to function
-            match unsafe { object::as_ref(frame.function) } {
-                ObjectRef::Str(_) | ObjectRef::NativeFunction(_) => {
-                    eprintln!("callee is not a VM function")
-                }
-                ObjectRef::Function(function) => {
-                    // ip is incremented already
-                    eprint!(
-                        "while evaluating line {}, ",
-                        function.chunk().line()[frame.ip - 1]
-                    );
-                    match function.name() {
-                        Some(name) => eprintln!("function {}", name.display()),
-                        None => eprintln!("top-level script"),
-                    }
+            // SAFETY: the frame contains valid pointer to a closure
+            unsafe {
+                let closure = frame.closure.as_ref();
+                let function = closure.function().as_ref();
+
+                // ip is incremented already
+                eprint!(
+                    "while evaluating line {}, ",
+                    function.chunk().line()[frame.ip - 1]
+                );
+                match function.name() {
+                    Some(name) => eprintln!("function {}", name.display()),
+                    None => eprintln!("top-level script"),
                 }
             }
         }
@@ -313,15 +375,10 @@ impl Vm {
                     return InterpretResult::RuntimeError;
                 }
             };
-            // SAFETY: given function is valid and we push to the call frame only valid functions
-            let function = match unsafe { object::as_ref(frame.function) } {
-                ObjectRef::Function(function) => function,
-                _ => {
-                    eprintln!("call frame contains reference to non-function");
-                    return InterpretResult::RuntimeError;
-                }
-            };
+            // SAFETY: given function is valid and we push to the call frame only valid closures
+            let function = unsafe { frame.closure.as_ref().function().as_ref() };
             let chunk = function.chunk();
+            let objects = &mut self.objects;
 
             if trace_available() {
                 // SAFETY: constants in chunk are valid
@@ -373,6 +430,56 @@ impl Vm {
                     let constant = extract_constant(&mut frame.ip, chunk);
                     self.stack.push(constant);
                 }
+                // SAFETY: the values reachable from the stack are valid
+                Some(Closure) => unsafe {
+                    use object::Closure;
+
+                    let fun_obj = {
+                        let obj = match extract_constant(&mut frame.ip, chunk) {
+                            Value::Object(obj) => obj,
+                            _ => {
+                                eprintln!("not a function object for OP_CLOSURE");
+                                return InterpretResult::RuntimeError;
+                            }
+                        };
+                        match object::as_ref(obj) {
+                            ObjectRef::Function(_) => obj.cast(),
+                            _ => {
+                                eprintln!("not a function object for OP_CLOSURE");
+                                return InterpretResult::RuntimeError;
+                            }
+                        }
+                    };
+                    let closure = Closure::new(fun_obj);
+                    let mut cls_obj = objects.allocate_closure(closure);
+                    self.stack.push(Object(cls_obj.cast()));
+
+                    // SAFETY: given function is valid and we push to the call frame only valid closures
+                    let cls = cls_obj.as_mut();
+                    let function = frame.closure.as_ref().function().as_ref();
+                    let chunk = function.chunk();
+                    for (i, upvalue) in cls.upvalues_mut().iter_mut().enumerate() {
+                        let is_local = chunk.code()[frame.ip];
+                        let index = chunk.code()[frame.ip + 1];
+                        frame.ip += 2;
+                        let upvalue_obj = if is_local > 0 {
+                            // inlining captureUpvalue() in clox
+
+                            // if `is_local == 1`, the upvalue is captured from the call-stack of
+                            // the direct parent of closure, which is the current frame.
+                            let index = frame.bp.saturating_add(usize::from(index));
+                            if index == usize::MAX {
+                                eprintln!("upvalue index cannot exceed usize::MAX");
+                                return InterpretResult::RuntimeError;
+                            }
+                            let upvalue = Upvalue::new_stack(index);
+                            Some(objects.allocate_upvalue(upvalue))
+                        } else {
+                            frame.closure.as_ref().upvalues()[i]
+                        };
+                        *upvalue = upvalue_obj;
+                    }
+                },
                 Some(DefineGlobal) => {
                     let key = match extract_constant_key(&mut frame.ip, chunk) {
                         Some(key) => key,
@@ -387,7 +494,7 @@ impl Vm {
                             return InterpretResult::RuntimeError;
                         }
                         Some(value) => {
-                            self.globals.insert(key, value.clone());
+                            objects.globals.insert(key, value.clone());
                         }
                     }
                     // we pop the value after inserting to globals table so that we can run GC
@@ -403,7 +510,7 @@ impl Vm {
                             return InterpretResult::CompileError;
                         }
                     };
-                    let value = match self.globals.get(&key) {
+                    let value = match objects.globals.get(&key) {
                         Some(value) => value,
                         None => {
                             eprintln!("undefined variable: {}", key.display());
@@ -426,7 +533,7 @@ impl Vm {
                             eprintln!("no stack for OP_SET_GLOBAL");
                             return InterpretResult::RuntimeError;
                         }
-                        Some(value) => match self.globals.entry(key) {
+                        Some(value) => match objects.globals.entry(key) {
                             Entry::Vacant(v) => {
                                 eprintln!("undefined variable: {}", v.key().display());
                                 return InterpretResult::RuntimeError;
@@ -452,6 +559,43 @@ impl Vm {
                         }
                         Some(v) => {
                             self.stack[local] = v;
+                        }
+                    }
+                }
+                Some(GetUpvalue) => {
+                    let index = usize::from(chunk.code()[frame.ip]);
+                    frame.ip += 1;
+                    // SAFETY: the closure of the current frame and its upvalue are valid objects
+                    unsafe {
+                        let upvalue = frame.closure.as_ref().upvalues()[index].unwrap();
+                        let stack_index = upvalue.as_ref().stack_index();
+                        if stack_index < usize::MAX {
+                            let value = self.stack[stack_index].clone();
+                            self.stack.push(value);
+                        } else {
+                            todo!()
+                        }
+                    }
+                }
+                Some(SetUpvalue) => {
+                    let index = usize::from(chunk.code()[frame.ip]);
+                    frame.ip += 1;
+                    // SAFETY: the closure of the current frame and its upvalue are valid objects
+                    unsafe {
+                        let upvalue = frame.closure.as_ref().upvalues()[index].unwrap();
+                        let stack_index = upvalue.as_ref().stack_index();
+                        if stack_index < usize::MAX {
+                            let top = match self.stack.last() {
+                                Some(top) => top.clone(),
+                                None => {
+                                    eprintln!("not enough stack for OP_SET_UPVALUE");
+                                    return InterpretResult::RuntimeError;
+                                }
+                            };
+
+                            self.stack[stack_index] = top;
+                        } else {
+                            todo!()
                         }
                     }
                 }
@@ -517,7 +661,7 @@ impl Vm {
                             match unsafe { (object::as_ref(o1), object::as_ref(o2)) } {
                                 (ObjectRef::Str(o1), ObjectRef::Str(o2)) => {
                                     let result = o1.as_rust_str().to_string() + o2.as_rust_str();
-                                    let obj = self.allocate_string(result);
+                                    let obj = objects.allocate_string(result);
                                     self.stack.push(Value::Object(obj.into_raw_obj()));
                                 }
                                 _ => {

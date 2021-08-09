@@ -7,14 +7,20 @@ use crate::{
 };
 
 // the pointer must have valid provenance not only for the header but the whole object
+// pub type RawValue = NonNull<Value>;
 pub type RawObject = NonNull<Header>;
 pub type RawStr = NonNull<Str>;
+pub type RawFunction = NonNull<Function>;
+pub type RawClosure = NonNull<Closure>;
+pub type RawUpvalue = NonNull<Upvalue>;
 
 #[repr(u8)]
 pub enum ObjectKind {
     Str,
     Function,
     NativeFunction,
+    Closure,
+    Upvalue,
 }
 
 #[repr(C)]
@@ -28,6 +34,9 @@ pub enum ObjectRef<'a> {
     Str(&'a Str),
     Function(&'a Function),
     NativeFunction(&'a NativeFunction),
+    Closure(&'a Closure),
+    // upvalues might contain self-referential pointer, so we do not provide a reference
+    Upvalue(*const Upvalue),
 }
 
 /// SAFETY: the object must be initialized and its kind must match the runtime representation.
@@ -47,6 +56,14 @@ pub unsafe fn as_ref<'a>(obj: RawObject) -> ObjectRef<'a> {
             ObjectKind::NativeFunction => {
                 let fun_ptr = obj as *mut NativeFunction;
                 ObjectRef::NativeFunction(fun_ptr.as_ref().unwrap())
+            }
+            ObjectKind::Closure => {
+                let cls_ptr = obj as *mut Closure;
+                ObjectRef::Closure(cls_ptr.as_ref().unwrap())
+            }
+            ObjectKind::Upvalue => {
+                let upvalue_ptr = obj as *mut Upvalue;
+                ObjectRef::Upvalue(upvalue_ptr)
             }
         }
     }
@@ -79,6 +96,7 @@ impl Str {
 pub struct Function {
     header: Header,
     arity: u8,
+    upvalues: u8,
     chunk: Chunk,
     name: Option<InternedStr>,
 }
@@ -91,18 +109,20 @@ impl Function {
                 next: None,
             },
             arity: 0,
+            upvalues: 0,
             chunk: Chunk::new(),
             name: None,
         }
     }
 
-    pub fn new_function(name: InternedStr, arity: u8) -> Self {
+    pub fn new_function(name: InternedStr, arity: u8, upvalues: u8) -> Self {
         Self {
             header: Header {
                 kind: ObjectKind::Function,
                 next: None,
             },
             arity,
+            upvalues,
             chunk: Chunk::new(),
             name: Some(name),
         }
@@ -114,6 +134,14 @@ impl Function {
 
     pub fn arity(&self) -> u8 {
         self.arity
+    }
+
+    pub fn upvalues(&self) -> u8 {
+        self.upvalues
+    }
+
+    pub fn upvalues_mut(&mut self) -> &mut u8 {
+        &mut self.upvalues
     }
 
     pub fn chunk(&self) -> &Chunk {
@@ -157,5 +185,66 @@ impl NativeFunction {
 
     pub fn fun(&self) -> fn(args: &[Value]) -> Value {
         self.fun
+    }
+}
+
+#[repr(C)]
+pub struct Closure {
+    header: Header,
+    // This must point to a Function
+    function: RawFunction,
+    upvalues: Vec<Option<RawUpvalue>>,
+}
+
+impl Closure {
+    /// SAFETY: function must point to valid function
+    pub unsafe fn new(function: RawFunction) -> Self {
+        // SAFETY: given function is valid
+        let num_upvalues = unsafe { function.as_ref().upvalues() };
+        Self {
+            header: Header {
+                kind: ObjectKind::Closure,
+                next: None,
+            },
+            function,
+            upvalues: vec![None; usize::from(num_upvalues)],
+        }
+    }
+
+    pub fn function(&self) -> RawFunction {
+        self.function
+    }
+
+    pub fn upvalues(&self) -> &Vec<Option<RawUpvalue>> {
+        &self.upvalues
+    }
+
+    pub fn upvalues_mut(&mut self) -> &mut Vec<Option<RawUpvalue>> {
+        &mut self.upvalues
+    }
+}
+
+#[repr(C)]
+pub struct Upvalue {
+    header: Header,
+    // the index of the open variable in the stack
+    stack_index: usize,
+    // when stack_index == usize::MAX, the variable is stored inline
+    // TODO
+}
+
+impl Upvalue {
+    pub fn new_stack(stack_index: usize) -> Self {
+        Self {
+            header: Header {
+                kind: ObjectKind::Upvalue,
+                next: None,
+            },
+            stack_index,
+        }
+    }
+
+    pub fn stack_index(&self) -> usize {
+        self.stack_index
     }
 }

@@ -84,7 +84,8 @@ fn main() -> std::io::Result<()> {
         };
         // SAFETY: we construct a chunk with valid constants
         unsafe {
-            let function = compiler.finish();
+            let (function, upvalues) = compiler.finish();
+            assert!(upvalues.is_empty());
             function.trace();
 
             vm.reset(function);
@@ -97,7 +98,7 @@ fn main() -> std::io::Result<()> {
 
     // SAFETY: we don't reuse vm and chunk, so no code can refer to deallocated objects.
     unsafe {
-        vm.free_all_objects();
+        vm.objects_mut().free_all_objects();
     }
 
     Ok(())

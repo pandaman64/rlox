@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::{cell::RefCell, convert::TryFrom};
 
 use crate::{
     ast::{
@@ -18,6 +18,11 @@ struct Local {
     depth: usize,
 }
 
+pub struct Upvalue {
+    index: u8,
+    is_local: bool,
+}
+
 #[derive(Debug)]
 pub enum FunctionKind {
     Function,
@@ -29,6 +34,7 @@ pub struct Compiler<'parent> {
     function: Function,
     kind: FunctionKind,
     locals: Vec<Local>,
+    upvalues: RefCell<Vec<Upvalue>>,
     block_depth: usize,
 }
 
@@ -49,6 +55,7 @@ impl<'parent> Compiler<'parent> {
             function: Function::new_script(),
             kind: FunctionKind::Script,
             locals: new_locals(),
+            upvalues: RefCell::new(vec![]),
             block_depth: 0,
         }
     }
@@ -56,16 +63,17 @@ impl<'parent> Compiler<'parent> {
     fn new_function(parent: &'parent Compiler<'parent>, name: InternedStr, arity: u8) -> Self {
         Self {
             parent: Some(parent),
-            function: Function::new_function(name, arity),
+            function: Function::new_function(name, arity, 0),
             kind: FunctionKind::Function,
             locals: new_locals(),
+            upvalues: RefCell::new(vec![]),
             block_depth: 0,
         }
     }
 
-    pub fn finish(mut self) -> Function {
+    pub fn finish(mut self) -> (Function, Vec<Upvalue>) {
         self.gen_return();
-        self.function
+        (self.function, self.upvalues.into_inner())
     }
 
     fn push_local(&mut self, ident: &str) {
@@ -125,6 +133,56 @@ impl<'parent> Compiler<'parent> {
             .map(|(i, _)| i)
     }
 
+    fn add_upvalue(&self, index: u8, is_local: bool) -> usize {
+        let mut upvalues = self.upvalues.borrow_mut();
+
+        if let Some(i) = upvalues
+            .iter()
+            .position(|upvalue| upvalue.index == index && upvalue.is_local == is_local)
+        {
+            return i;
+        }
+
+        let ret = upvalues.len();
+
+        if ret > 255 {
+            panic!("closure cannot have more than 255 upvalues");
+        }
+
+        upvalues.push(Upvalue { index, is_local });
+        ret
+    }
+
+    fn resolve_upvalue(&self, ident: &str) -> Option<usize> {
+        let parent = self.parent?;
+        match parent.resolve_local(ident) {
+            Some(local) => Some(self.add_upvalue(u8::try_from(local).unwrap(), true)),
+            None => {
+                let index = parent.resolve_upvalue(ident)?;
+                Some(self.add_upvalue(u8::try_from(index).unwrap(), false))
+            }
+        }
+    }
+
+    fn resolve(&mut self, vm: &mut Vm, ident: Identifier) -> (OpCode, OpCode, u8) {
+        if let Some(i) = self.resolve_local(ident.to_str()) {
+            (OpCode::GetLocal, OpCode::SetLocal, u8::try_from(i).unwrap())
+        } else if let Some(i) = self.resolve_upvalue(ident.to_str()) {
+            (
+                OpCode::GetUpvalue,
+                OpCode::SetUpvalue,
+                u8::try_from(i).unwrap(),
+            )
+        } else {
+            let ident = vm.objects_mut().allocate_string(ident.to_str().into());
+            let index = self
+                .chunk_mut()
+                .push_constant(Value::Object(ident.into_raw_obj()));
+
+            (OpCode::GetGlobal, OpCode::SetGlobal, index)
+        }
+    }
+
     fn chunk_mut(&mut self) -> &mut Chunk {
         self.function.chunk_mut()
     }
@@ -174,23 +232,10 @@ impl<'parent> Compiler<'parent> {
                         if has_target {
                             todo!()
                         } else {
-                            match self.resolve_local(ident.to_str()) {
-                                Some(i) => {
-                                    self.gen_expr(vm, rhs);
-                                    self.chunk_mut().push_code(OpCode::SetLocal as _, 0);
-                                    self.chunk_mut().push_code(i as _, 0);
-                                }
-                                None => {
-                                    let ident = vm.allocate_string(ident.to_str().into());
-                                    let index = self
-                                        .chunk_mut()
-                                        .push_constant(Value::Object(ident.into_raw_obj()));
-
-                                    self.gen_expr(vm, rhs);
-                                    self.chunk_mut().push_code(OpCode::SetGlobal as _, 0);
-                                    self.chunk_mut().push_code(index, 0);
-                                }
-                            }
+                            let (_get_op, set_op, index) = self.resolve(vm, ident);
+                            self.gen_expr(vm, rhs);
+                            self.chunk_mut().push_code(set_op as _, 0);
+                            self.chunk_mut().push_code(index, 0);
                         }
                         return;
                     }
@@ -250,21 +295,11 @@ impl<'parent> Compiler<'parent> {
                 }
             }
             Expr::Primary(expr) => match expr {
-                Primary::Identifier(ident) => match self.resolve_local(ident.to_str()) {
-                    Some(i) => {
-                        self.chunk_mut().push_code(OpCode::GetLocal as _, 0);
-                        self.chunk_mut().push_code(i as u8, 0);
-                    }
-                    None => {
-                        let ident = vm.allocate_string(ident.to_str().into());
-                        let index = self
-                            .chunk_mut()
-                            .push_constant(Value::Object(ident.into_raw_obj()));
-
-                        self.chunk_mut().push_code(OpCode::GetGlobal as _, 0);
-                        self.chunk_mut().push_code(index, 0);
-                    }
-                },
+                Primary::Identifier(ident) => {
+                    let (get_op, _set_op, index) = self.resolve(vm, ident);
+                    self.chunk_mut().push_code(get_op as _, 0);
+                    self.chunk_mut().push_code(index, 0);
+                }
                 Primary::NilLiteral(_) => {
                     self.chunk_mut().push_code(OpCode::Nil as _, 0);
                 }
@@ -276,7 +311,7 @@ impl<'parent> Compiler<'parent> {
                     }
                 }
                 Primary::StringLiteral(s) => {
-                    let obj = vm.allocate_string(s.to_str().into());
+                    let obj = vm.objects_mut().allocate_string(s.to_str().into());
                     let index = self
                         .chunk_mut()
                         .push_constant(Value::Object(obj.into_raw_obj()));
@@ -441,7 +476,7 @@ impl<'parent> Compiler<'parent> {
             assert_eq!(idx + 1, self.locals.len());
             self.locals[idx].depth = self.block_depth;
         } else {
-            let ident = vm.allocate_string(ident.to_str().into());
+            let ident = vm.objects_mut().allocate_string(ident.to_str().into());
             let index = self
                 .chunk_mut()
                 .push_constant(Value::Object(ident.into_raw_obj()));
@@ -465,7 +500,7 @@ impl<'parent> Compiler<'parent> {
             Decl::VarDecl(decl) => self.gen_var_decl(vm, decl),
             Decl::FunDecl(decl) => {
                 let name = decl.ident().unwrap();
-                let name = vm.allocate_string(name.to_str().into());
+                let name = vm.objects_mut().allocate_string(name.to_str().into());
                 let arity = u8::try_from(decl.params().count())
                     .expect("function cannot have more than 255 arguments");
                 let mut compiler = Compiler::new_function(self, name, arity);
@@ -476,13 +511,20 @@ impl<'parent> Compiler<'parent> {
                 }
                 compiler.gen_block_stmt(vm, decl.body().unwrap());
                 compiler.end_block();
-                let function = compiler.finish();
-                let fun_obj = vm.allocate_function(function);
+                let (mut function, upvalues) = compiler.finish();
+                *function.upvalues_mut() = u8::try_from(upvalues.len()).unwrap();
+                let fun_obj = vm.objects_mut().allocate_function(function);
 
                 self.define_variable(vm, decl.ident().unwrap(), move |this, _vm| {
                     let index = this.chunk_mut().push_constant(Value::Object(fun_obj));
-                    this.chunk_mut().push_code(OpCode::Constant as _, 0);
+                    this.chunk_mut().push_code(OpCode::Closure as _, 0);
                     this.chunk_mut().push_code(index, 0);
+
+                    for upvalue in upvalues.iter() {
+                        let is_local = if upvalue.is_local { 1 } else { 0 };
+                        this.chunk_mut().push_code(is_local, 0);
+                        this.chunk_mut().push_code(upvalue.index, 0);
+                    }
                 });
             }
             Decl::Stmt(stmt) => self.gen_stmt(vm, stmt),
