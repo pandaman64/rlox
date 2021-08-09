@@ -74,7 +74,8 @@ pub enum InterpretResult {
 }
 
 pub struct Objects {
-    head: Option<RawObject>,
+    objects_head: Option<RawObject>,
+    open_upvalues_head: Option<RawUpvalue>,
     strings: HashSet<InternedStr>,
     globals: HashMap<Key, Value>,
 }
@@ -82,7 +83,8 @@ pub struct Objects {
 impl Objects {
     fn new() -> Self {
         Self {
-            head: None,
+            objects_head: None,
+            open_upvalues_head: None,
             strings: HashSet::new(),
             globals: HashMap::new(),
         }
@@ -96,9 +98,9 @@ impl Objects {
             let obj_ptr = obj.as_ptr();
             let next_ptr = ptr::addr_of_mut!((*obj_ptr).next);
             assert!(ptr::read(next_ptr).is_none());
-            ptr::write(next_ptr, self.head);
+            ptr::write(next_ptr, self.objects_head);
 
-            self.head = Some(obj);
+            self.objects_head = Some(obj);
         }
     }
 
@@ -107,11 +109,11 @@ impl Objects {
         self.strings.clear();
         self.globals.clear();
 
-        while let Some(obj) = { self.head } {
+        while let Some(obj) = { self.objects_head } {
             // SAFETY: self.objects points to an initialized object and covers the whole allocation
             // in an type-safe manner. this property must be guaranteed by allocation methods.
             unsafe {
-                self.head = free_object(obj);
+                self.objects_head = free_object(obj);
             }
         }
     }
@@ -243,6 +245,72 @@ unsafe fn free_object(obj: RawObject) -> Option<RawObject> {
     }
 }
 
+/// SAFETY: the objects and the frame must be valid
+unsafe fn capture_upvalue(
+    objects: &mut Objects,
+    frame: &mut CallFrame,
+    index: u8,
+) -> Result<RawUpvalue, InterpretResult> {
+    let stack_index = frame.bp.saturating_add(usize::from(index));
+    if stack_index == usize::MAX {
+        eprintln!("upvalue index cannot exceed usize::MAX");
+        return Err(InterpretResult::RuntimeError);
+    }
+
+    let mut prev = None;
+    let mut current = objects.open_upvalues_head;
+
+    while let Some(cur) = current {
+        // SAFETY: the objects must be valid
+        unsafe {
+            if cur.as_ref().stack_index() <= stack_index {
+                break;
+            }
+            prev = current;
+            current = cur.as_ref().next();
+        }
+    }
+
+    if let Some(cur) = current {
+        // SAFETY: the objects must be valid
+        unsafe {
+            if cur.as_ref().stack_index() == stack_index {
+                return Ok(cur);
+            }
+        }
+    }
+
+    let upvalue = Upvalue::new_stack(stack_index, current);
+    let upvalue_obj = objects.allocate_upvalue(upvalue);
+
+    match prev {
+        None => objects.open_upvalues_head = Some(upvalue_obj),
+        // SAFETY: the objects must be valid
+        Some(mut prev) => unsafe {
+            *prev.as_mut().next_mut() = Some(upvalue_obj);
+        },
+    }
+
+    Ok(upvalue_obj)
+}
+
+/// SAFETY: the objects and stack must be valid
+unsafe fn close_upvalue(objects: &mut Objects, stack: &[Value], stack_index: usize) {
+    // SAFETY: the objects and stack are valid
+    unsafe {
+        while let Some(mut head) = objects.open_upvalues_head {
+            if head.as_ref().stack_index() < stack_index {
+                break;
+            }
+
+            let head = head.as_mut();
+            let value = stack[head.stack_index()].clone();
+            head.close(value);
+            objects.open_upvalues_head = head.next();
+        }
+    }
+}
+
 impl Vm {
     pub fn new() -> Self {
         Self {
@@ -281,9 +349,17 @@ impl Vm {
     }
 
     pub fn reset(&mut self, function: Function) {
-        let function = self.objects.allocate_function(function);
-        self.stack = vec![Value::Object(function)];
+        assert_eq!(function.upvalues(), 0);
+
         self.frames = vec![];
+
+        let fun_obj = self.objects.allocate_function(function);
+        self.stack = vec![Value::Object(fun_obj)];
+        // SAFETY: function is valid
+        let closure = unsafe { Closure::new(fun_obj.cast()) };
+        let cls_obj = self.objects.allocate_closure(closure);
+        self.stack.pop();
+        self.stack.push(Value::Object(cls_obj.cast()));
     }
 
     pub fn call(&mut self, args: u8) -> bool {
@@ -403,6 +479,10 @@ impl Vm {
                     let ret = self.stack.pop().unwrap();
                     let frame = self.frames.pop().unwrap();
 
+                    // SAFETY: the objects and stack are valid
+                    unsafe {
+                        close_upvalue(objects, &self.stack, frame.bp);
+                    }
                     if self.frames.is_empty() {
                         // pop the top-level script function object
                         self.stack.pop();
@@ -463,17 +543,13 @@ impl Vm {
                         let index = chunk.code()[frame.ip + 1];
                         frame.ip += 2;
                         let upvalue_obj = if is_local > 0 {
-                            // inlining captureUpvalue() in clox
-
                             // if `is_local == 1`, the upvalue is captured from the call-stack of
                             // the direct parent of closure, which is the current frame.
-                            let index = frame.bp.saturating_add(usize::from(index));
-                            if index == usize::MAX {
-                                eprintln!("upvalue index cannot exceed usize::MAX");
-                                return InterpretResult::RuntimeError;
+
+                            match capture_upvalue(objects, frame, index) {
+                                Err(e) => return e,
+                                Ok(upvalue) => Some(upvalue),
                             }
-                            let upvalue = Upvalue::new_stack(index);
-                            Some(objects.allocate_upvalue(upvalue))
                         } else {
                             frame.closure.as_ref().upvalues()[i]
                         };
@@ -573,7 +649,8 @@ impl Vm {
                             let value = self.stack[stack_index].clone();
                             self.stack.push(value);
                         } else {
-                            todo!()
+                            let value = upvalue.as_ref().closed_value().clone();
+                            self.stack.push(value);
                         }
                     }
                 }
@@ -582,20 +659,19 @@ impl Vm {
                     frame.ip += 1;
                     // SAFETY: the closure of the current frame and its upvalue are valid objects
                     unsafe {
-                        let upvalue = frame.closure.as_ref().upvalues()[index].unwrap();
+                        let mut upvalue = frame.closure.as_ref().upvalues()[index].unwrap();
                         let stack_index = upvalue.as_ref().stack_index();
+                        let top = match self.stack.last() {
+                            Some(top) => top.clone(),
+                            None => {
+                                eprintln!("not enough stack for OP_SET_UPVALUE");
+                                return InterpretResult::RuntimeError;
+                            }
+                        };
                         if stack_index < usize::MAX {
-                            let top = match self.stack.last() {
-                                Some(top) => top.clone(),
-                                None => {
-                                    eprintln!("not enough stack for OP_SET_UPVALUE");
-                                    return InterpretResult::RuntimeError;
-                                }
-                            };
-
                             self.stack[stack_index] = top;
                         } else {
-                            todo!()
+                            *upvalue.as_mut().closed_value_mut() = top;
                         }
                     }
                 }
@@ -606,6 +682,13 @@ impl Vm {
                     }
                     Some(_) => {}
                 },
+                Some(CloseUpvalue) => {
+                    // SAFETY: the objects and stack are valid
+                    unsafe {
+                        close_upvalue(objects, &self.stack, self.stack.len() - 1);
+                    }
+                    self.stack.pop();
+                }
                 Some(OpCode::Nil) => {
                     self.stack.push(Value::Nil);
                 }

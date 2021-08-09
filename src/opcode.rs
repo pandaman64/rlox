@@ -18,6 +18,7 @@ pub enum OpCode {
     Constant,
     Closure,
     Pop,
+    CloseUpvalue,
     Negate,
     Not,
     Equal,
@@ -134,10 +135,8 @@ impl Chunk {
                                     };
                                     let index = self.code[offset + 2];
                                     eprintln!(
-                                        "{:04}      |                     {} {}",
-                                        offset - 2,
-                                        is_local,
-                                        index
+                                        "{:04}    |                     {} {}",
+                                        offset, index, is_local,
                                     );
                                     offset += 2;
                                 }
@@ -150,6 +149,7 @@ impl Chunk {
                 offset
             }
             Some(Pop) => trace_simple_code(offset, "OP_POP"),
+            Some(CloseUpvalue) => trace_simple_code(offset, "OP_CLOSE_UPVALUE"),
             Some(Negate) => trace_simple_code(offset, "OP_NEGATE"),
             Some(Not) => trace_simple_code(offset, "OP_NOT"),
             Some(Equal) => trace_simple_code(offset, "OP_EQUAL"),

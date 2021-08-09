@@ -227,24 +227,49 @@ impl Closure {
 #[repr(C)]
 pub struct Upvalue {
     header: Header,
+    // pointer to the next upvalue
+    next: Option<RawUpvalue>,
     // the index of the open variable in the stack
     stack_index: usize,
     // when stack_index == usize::MAX, the variable is stored inline
-    // TODO
+    closed_value: Value,
 }
 
 impl Upvalue {
-    pub fn new_stack(stack_index: usize) -> Self {
+    pub fn new_stack(stack_index: usize, next: Option<RawUpvalue>) -> Self {
         Self {
             header: Header {
                 kind: ObjectKind::Upvalue,
                 next: None,
             },
+            next,
             stack_index,
+            closed_value: Value::Nil,
         }
+    }
+
+    pub fn next(&self) -> Option<RawUpvalue> {
+        self.next
+    }
+
+    pub fn next_mut(&mut self) -> &mut Option<RawUpvalue> {
+        &mut self.next
     }
 
     pub fn stack_index(&self) -> usize {
         self.stack_index
+    }
+
+    pub fn closed_value(&self) -> &Value {
+        &self.closed_value
+    }
+
+    pub fn closed_value_mut(&mut self) -> &mut Value {
+        &mut self.closed_value
+    }
+
+    pub fn close(&mut self, value: Value) {
+        self.stack_index = usize::MAX;
+        self.closed_value = value;
     }
 }

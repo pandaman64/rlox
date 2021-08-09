@@ -1,4 +1,7 @@
-use std::{cell::RefCell, convert::TryFrom};
+use std::{
+    cell::{Cell, RefCell},
+    convert::TryFrom,
+};
 
 use crate::{
     ast::{
@@ -16,6 +19,7 @@ const GLOBAL_BLOCK: usize = 0;
 struct Local {
     ident: String,
     depth: usize,
+    captured: Cell<bool>,
 }
 
 pub struct Upvalue {
@@ -44,6 +48,7 @@ fn new_locals() -> Vec<Local> {
         Local {
             ident: "<callee>".into(),
             depth: 0,
+            captured: Cell::new(false),
         },
     ]
 }
@@ -95,6 +100,7 @@ impl<'parent> Compiler<'parent> {
         self.locals.push(Local {
             ident: ident.into(),
             depth: usize::MAX,
+            captured: Cell::new(false),
         });
     }
 
@@ -107,8 +113,12 @@ impl<'parent> Compiler<'parent> {
             if local.depth != self.block_depth {
                 break;
             }
+            if !local.captured.get() {
+                self.chunk_mut().push_code(OpCode::Pop as _, 0);
+            } else {
+                self.chunk_mut().push_code(OpCode::CloseUpvalue as _, 0);
+            }
             self.locals.pop();
-            self.chunk_mut().push_code(OpCode::Pop as _, 0);
         }
         self.block_depth -= 1;
     }
@@ -156,7 +166,10 @@ impl<'parent> Compiler<'parent> {
     fn resolve_upvalue(&self, ident: &str) -> Option<usize> {
         let parent = self.parent?;
         match parent.resolve_local(ident) {
-            Some(local) => Some(self.add_upvalue(u8::try_from(local).unwrap(), true)),
+            Some(local) => {
+                parent.locals[local].captured.set(true);
+                Some(self.add_upvalue(u8::try_from(local).unwrap(), true))
+            }
             None => {
                 let index = parent.resolve_upvalue(ident)?;
                 Some(self.add_upvalue(u8::try_from(index).unwrap(), false))

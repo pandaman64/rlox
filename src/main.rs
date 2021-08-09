@@ -11,7 +11,7 @@ mod value;
 mod vm;
 
 use std::{
-    io::BufRead,
+    io::{BufRead, Write},
     sync::{
         atomic::{self, AtomicBool},
         Once,
@@ -32,18 +32,10 @@ pub fn trace_available() -> bool {
     AVAILABLE.load(atomic::Ordering::Relaxed)
 }
 
-fn main() -> std::io::Result<()> {
-    use std::io::Write;
-
+fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
     // std::env::set_var("RUST_LOG", "trace");
 
-    let mut line = String::new();
-    let stdin = std::io::stdin();
-    let mut stdin = stdin.lock();
-    let stdout = std::io::stdout();
-    let mut stdout = stdout.lock();
     let mut vm = Vm::new();
-
     vm.define_native_function(
         "clock".into(),
         NativeFunction::new(|_args| {
@@ -57,11 +49,15 @@ fn main() -> std::io::Result<()> {
         }),
     );
 
+    let mut line = String::new();
+    let stdout = std::io::stdout();
+    let mut stdout = stdout.lock();
+
     loop {
         line.clear();
         write!(stdout, "> ")?;
         stdout.flush()?;
-        if stdin.read_line(&mut line)? == 0 {
+        if input.read_line(&mut line)? == 0 {
             break;
         }
 
@@ -102,4 +98,22 @@ fn main() -> std::io::Result<()> {
     }
 
     Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    let stdin = std::io::stdin();
+    let stdin = stdin.lock();
+    repl(stdin)
+}
+
+#[test]
+fn test_closure() {
+    let input: &[u8] = br#""
+fun greet(name) { fun hi() { print name; } return hi; }
+var john = greet("John");
+var bob = greet("Bob");
+john();
+bob();
+""#;
+    repl(input).unwrap();
 }
