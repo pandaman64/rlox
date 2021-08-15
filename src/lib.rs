@@ -51,9 +51,15 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> io::Result<()> {
         }),
     );
 
-    let node = syntax::parse(input);
+    let (node, errors) = syntax::parse(input);
     if trace_available() {
         eprintln!("{:#?}", node);
+    }
+    if !errors.is_empty() {
+        for error in errors {
+            eprintln!("{:?}", error);
+        }
+        return Err(io::Error::new(io::ErrorKind::Other, "syntax error"));
     }
 
     let mut compiler = Compiler::new_script();

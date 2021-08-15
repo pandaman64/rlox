@@ -5,9 +5,23 @@ use rowan::GreenNodeBuilder;
 
 use super::{lexer::lex, SyntaxKind, SyntaxNode};
 
+#[derive(Debug)]
+pub enum SyntaxError {
+    UnexpectedToken {
+        expected: SyntaxKind,
+        got: SyntaxKind,
+        position: usize,
+    },
+    UnexpectedEof {
+        expected: SyntaxKind,
+    },
+}
+
 pub struct Parser<'i, I: Iterator<Item = (SyntaxKind, &'i str, Range<usize>)>> {
     builder: GreenNodeBuilder<'static>,
     input: Peekable<I>,
+    errors: Vec<SyntaxError>,
+    position: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -71,7 +85,8 @@ where
     I: Iterator<Item = (SyntaxKind, &'i str, Range<usize>)>,
 {
     fn bump(&mut self) {
-        if let Some((token, slice, _range)) = self.input.next() {
+        if let Some((token, slice, range)) = self.input.next() {
+            self.position = range.end;
             self.builder.token(token.into(), slice)
         }
     }
@@ -89,8 +104,14 @@ where
     }
 
     fn expect(&mut self, expected: SyntaxKind) {
-        if matches!(self.peek(), Some(token) if token == expected) {
-            self.bump();
+        match self.peek() {
+            Some(token) if token == expected => self.bump(),
+            Some(got) => self.errors.push(SyntaxError::UnexpectedToken {
+                expected,
+                got,
+                position: self.position,
+            }),
+            None => self.errors.push(SyntaxError::UnexpectedEof { expected }),
         }
     }
 
@@ -350,14 +371,17 @@ where
     }
 
     /// parse a program
-    pub fn parse(mut self) -> SyntaxNode {
+    pub fn parse(mut self) -> (SyntaxNode, Vec<SyntaxError>) {
         self.builder.start_node(SyntaxKind::RootNode.into());
         while self.peek().is_some() {
             self.parse_decl();
         }
         self.builder.finish_node();
 
-        SyntaxNode::new_root(self.builder.finish())
+        let root = SyntaxNode::new_root(self.builder.finish());
+        let errors = self.errors;
+
+        (root, errors)
     }
 }
 
@@ -365,5 +389,7 @@ pub fn parser(input: &str) -> Parser<'_, impl Iterator<Item = (SyntaxKind, &str,
     Parser {
         builder: GreenNodeBuilder::default(),
         input: lex(input).peekable(),
+        errors: vec![],
+        position: 0,
     }
 }

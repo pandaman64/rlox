@@ -3,6 +3,8 @@ mod parser;
 
 use logos::Logos;
 
+use self::parser::SyntaxError;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Logos, num_derive::FromPrimitive)]
 #[repr(u16)]
 pub enum SyntaxKind {
@@ -164,6 +166,6 @@ pub type SyntaxToken = rowan::SyntaxToken<Language>;
 pub type SyntaxNode = rowan::SyntaxNode<Language>;
 pub type NodeOrToken = rowan::NodeOrToken<SyntaxNode, SyntaxToken>;
 
-pub fn parse(input: &str) -> SyntaxNode {
+pub fn parse(input: &str) -> (SyntaxNode, Vec<SyntaxError>) {
     parser::parser(input).parse()
 }

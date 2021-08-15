@@ -2,7 +2,11 @@
 // #![warn(unreachable_pub)]
 
 use clap::Clap;
-use std::{fs, io::BufRead, path::PathBuf};
+use std::{
+    fs,
+    io::{self, BufRead},
+    path::PathBuf,
+};
 
 use rlox::{
     ast::Root,
@@ -41,9 +45,15 @@ fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
             break;
         }
 
-        let node = rlox::syntax::parse(&line);
+        let (node, errors) = rlox::syntax::parse(&line);
         if trace_available() {
             eprintln!("{:#?}", node);
+        }
+        if !errors.is_empty() {
+            for error in errors {
+                eprintln!("{:?}", error);
+            }
+            return Err(io::Error::new(io::ErrorKind::Other, "syntax error"));
         }
 
         let mut compiler = Compiler::new_script();
