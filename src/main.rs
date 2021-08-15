@@ -1,7 +1,7 @@
 #![deny(rust_2018_idioms, unsafe_op_in_unsafe_fn)]
 // #![warn(unreachable_pub)]
 
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 
 use rlox::{
     ast::Root,
@@ -14,7 +14,11 @@ use rlox::{
 fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
     // std::env::set_var("RUST_LOG", "trace");
 
-    let mut vm = Vm::new();
+    let mut line = String::new();
+    let stdout = std::io::stdout();
+    let mut stdout = stdout.lock();
+
+    let mut vm = Vm::new(&mut stdout);
     vm.define_native_function(
         "clock".into(),
         NativeFunction::new(|_args| {
@@ -28,14 +32,10 @@ fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
         }),
     );
 
-    let mut line = String::new();
-    let stdout = std::io::stdout();
-    let mut stdout = stdout.lock();
-
     loop {
         line.clear();
-        write!(stdout, "> ")?;
-        stdout.flush()?;
+        vm.print("> ")?;
+        vm.flush()?;
         if input.read_line(&mut line)? == 0 {
             break;
         }
@@ -83,16 +83,4 @@ fn main() -> std::io::Result<()> {
     let stdin = std::io::stdin();
     let stdin = stdin.lock();
     repl(stdin)
-}
-
-#[test]
-fn test_closure() {
-    let input: &[u8] = br#""
-fun greet(name) { fun hi() { print name; } return hi; }
-var john = greet("John");
-var bob = greet("Bob");
-john();
-bob();
-""#;
-    repl(input).unwrap();
 }

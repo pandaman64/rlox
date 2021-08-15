@@ -1,5 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt,
+    io::{self, Write},
     mem::discriminant,
     ptr,
 };
@@ -169,10 +171,11 @@ impl Objects {
     }
 }
 
-pub struct Vm {
+pub struct Vm<'w> {
     stack: Vec<Value>,
     frames: Vec<CallFrame>,
     objects: Objects,
+    stdout: &'w mut (dyn Write + 'w),
 }
 
 fn extract_constant(ip: &mut usize, chunk: &Chunk) -> Value {
@@ -316,19 +319,14 @@ unsafe fn close_upvalue(objects: &mut Objects, stack: &[Value], stack_index: usi
     }
 }
 
-impl Default for Vm {
-    fn default() -> Self {
+impl<'w> Vm<'w> {
+    pub fn new(stdout: &'w mut (dyn Write + 'w)) -> Self {
         Self {
             stack: vec![],
             frames: vec![],
             objects: Objects::new(),
+            stdout,
         }
-    }
-}
-
-impl Vm {
-    pub fn new() -> Self {
-        Self::default()
     }
 
     pub fn objects_mut(&mut self) -> &mut Objects {
@@ -425,6 +423,14 @@ impl Vm {
         }
     }
 
+    pub fn print<M: fmt::Display>(&mut self, message: M) -> io::Result<()> {
+        write!(self.stdout, "{}", message)
+    }
+
+    pub fn flush(&mut self) -> io::Result<()> {
+        self.stdout.flush()
+    }
+
     /// # Safety
     /// stack and frames must be valid
     pub unsafe fn print_stack_trace(&self) {
@@ -514,7 +520,9 @@ impl Vm {
                         Some(v) => {
                             // SAFETY: v is a valid value
                             unsafe {
-                                println!("{}", v.format_args());
+                                if write!(self.stdout, "{}", v.format_args()).is_err() {
+                                    return InterpretResult::RuntimeError;
+                                }
                             }
                         }
                     }

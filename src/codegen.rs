@@ -177,7 +177,7 @@ impl<'parent> Compiler<'parent> {
         }
     }
 
-    fn resolve(&mut self, vm: &mut Vm, ident: Identifier) -> (OpCode, OpCode, u8) {
+    fn resolve(&mut self, vm: &mut Vm<'_>, ident: Identifier) -> (OpCode, OpCode, u8) {
         if let Some(i) = self.resolve_local(ident.to_str()) {
             (OpCode::GetLocal, OpCode::SetLocal, u8::try_from(i).unwrap())
         } else if let Some(i) = self.resolve_upvalue(ident.to_str()) {
@@ -205,7 +205,7 @@ impl<'parent> Compiler<'parent> {
         self.chunk_mut().push_code(OpCode::Return as _, 0);
     }
 
-    fn gen_place(&mut self, vm: &mut Vm, expr: Expr) -> (bool, Identifier) {
+    fn gen_place(&mut self, vm: &mut Vm<'_>, expr: Expr) -> (bool, Identifier) {
         match expr {
             Expr::Primary(Primary::Identifier(ident)) => (false, ident),
             Expr::BinOp(expr) if expr.kind() == BinOpKind::Dot => {
@@ -224,7 +224,7 @@ impl<'parent> Compiler<'parent> {
         }
     }
 
-    fn gen_expr(&mut self, vm: &mut Vm, expr: Expr) {
+    fn gen_expr(&mut self, vm: &mut Vm<'_>, expr: Expr) {
         match expr {
             Expr::UnaryOp(expr) => {
                 let operand = Expr::cast(expr.operand().unwrap()).unwrap();
@@ -355,7 +355,7 @@ impl<'parent> Compiler<'parent> {
         }
     }
 
-    fn gen_block_stmt(&mut self, vm: &mut Vm, stmt: BlockStmt) {
+    fn gen_block_stmt(&mut self, vm: &mut Vm<'_>, stmt: BlockStmt) {
         self.begin_block();
         for decl in stmt.decls() {
             self.gen_decl(vm, decl);
@@ -363,7 +363,7 @@ impl<'parent> Compiler<'parent> {
         self.end_block();
     }
 
-    fn gen_stmt(&mut self, vm: &mut Vm, stmt: Stmt) {
+    fn gen_stmt(&mut self, vm: &mut Vm<'_>, stmt: Stmt) {
         match stmt {
             Stmt::ExprStmt(stmt) => {
                 self.gen_expr(vm, stmt.expr().unwrap());
@@ -478,9 +478,9 @@ impl<'parent> Compiler<'parent> {
         }
     }
 
-    fn define_variable<F>(&mut self, vm: &mut Vm, ident: Identifier, gen_value: F)
+    fn define_variable<F>(&mut self, vm: &mut Vm<'_>, ident: Identifier, gen_value: F)
     where
-        F: FnOnce(&mut Self, &mut Vm),
+        F: FnOnce(&mut Self, &mut Vm<'_>),
     {
         if self.block_depth > GLOBAL_BLOCK {
             let idx = self.locals.len();
@@ -499,7 +499,7 @@ impl<'parent> Compiler<'parent> {
         }
     }
 
-    fn gen_var_decl(&mut self, vm: &mut Vm, decl: VarDecl) {
+    fn gen_var_decl(&mut self, vm: &mut Vm<'_>, decl: VarDecl) {
         let ident = decl.ident().unwrap();
         let expr = decl.expr();
         self.define_variable(vm, ident, move |this, vm| match expr {
@@ -508,7 +508,7 @@ impl<'parent> Compiler<'parent> {
         });
     }
 
-    pub fn gen_decl(&mut self, vm: &mut Vm, decl: Decl) {
+    pub fn gen_decl(&mut self, vm: &mut Vm<'_>, decl: Decl) {
         match decl {
             Decl::VarDecl(decl) => self.gen_var_decl(vm, decl),
             Decl::FunDecl(decl) => {
