@@ -516,8 +516,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
                 let start_loop_ip = self.current_ip();
 
-                let end_jump = stmt.cond().map(|cond| {
-                    let expr = cond.expr().unwrap();
+                let end_jump = stmt.cond().unwrap().expr().map(|expr| {
                     let position = expr.start();
                     self.gen_expr(vm, expr);
                     self.push_opcode(OpCode::JumpIfFalse, position);
@@ -528,8 +527,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
                 self.gen_stmt(vm, stmt.body().unwrap());
 
-                if let Some(incr) = stmt.incr() {
-                    let expr = incr.expr().unwrap();
+                if let Some(expr) = stmt.incr().unwrap().expr() {
                     let position = expr.start();
                     self.gen_expr(vm, expr);
                     self.push_opcode(OpCode::Pop, position);
