@@ -1,3 +1,6 @@
-// [line 3] Error at '{': Expect expression.
-// [line 3] Error at ')': Expect ';' after expression.
+// modified to match my implementation
+// [line 6] Error at '{': Expect expression.
+// [line 6] Error at '}': Expect expression.
+// [line 6] Error at ';': Expect expression.
+// [line 6] Error at ')': Expect expression.
 for (var a = 1; {}; a = a + 1) {}
