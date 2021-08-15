@@ -622,7 +622,7 @@ impl<'w> Vm<'w> {
                         }
                         Some(value) => match objects.globals.entry(key) {
                             Entry::Vacant(v) => {
-                                eprintln!("undefined variable: {}", v.key().display());
+                                eprintln!("Undefined variable '{}'.", v.key().display());
                                 return InterpretResult::RuntimeError;
                             }
                             Entry::Occupied(mut o) => {
