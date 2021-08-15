@@ -257,20 +257,23 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 let field = operands.next().unwrap();
                 let ident = match field {
                     Expr::Primary(Primary::Identifier(ident)) => ident,
-                    _ => todo!("non-identifier expression is used as field"),
+                    _ => unreachable!("non-identifier expression is used as field"),
                 };
                 self.gen_expr(vm, target);
                 (true, ident)
             }
             // TODO: emit error message
-            _ => todo!("place expression must be an identifier or dot expression"),
+            _ => unreachable!("place expression must be an identifier or dot expression"),
         }
     }
 
     fn gen_expr(&mut self, vm: &mut Vm<'_>, expr: Expr) {
         match expr {
+            Expr::ParenExpr(expr) => {
+                self.gen_expr(vm, expr.expr().unwrap());
+            }
             Expr::UnaryOp(expr) => {
-                let operand = Expr::cast(expr.operand().unwrap()).unwrap();
+                let operand = expr.operand().unwrap();
                 self.gen_expr(vm, operand);
                 let opcode = match expr.kind() {
                     UnaryOpKind::Negation => OpCode::Negate,

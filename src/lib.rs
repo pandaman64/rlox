@@ -73,6 +73,10 @@ pub fn print_syntax_error(error: &SyntaxError, input: &str, line_map: &LineMap) 
                 got.to_keyword_str().unwrap()
             );
         }
+        InvalidAssignment { position } => {
+            let line = line_map.resolve(*position);
+            eprintln!("[line {}] Error at '=': Invalid assignment target.", line);
+        }
         _ => {
             // TODO: adjust error message
             // eprintln!("{:?}", error);

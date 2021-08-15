@@ -14,6 +14,29 @@ fn try_as_ident(child: NodeOrToken) -> Option<Identifier> {
     }
 }
 
+#[derive(Debug)]
+pub struct ParenExpr {
+    inner: SyntaxNode,
+}
+
+impl ParenExpr {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::ParenExprNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
+    pub fn expr(&self) -> Option<Expr> {
+        self.inner.children().find_map(Expr::cast)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UnaryOpKind {
     Negation,
@@ -50,8 +73,8 @@ impl UnaryOp {
         }
     }
 
-    pub fn operand(&self) -> Option<SyntaxNode> {
-        self.inner.first_child()
+    pub fn operand(&self) -> Option<Expr> {
+        self.inner.children().find_map(Expr::cast)
     }
 }
 
@@ -320,6 +343,7 @@ impl CallExpr {
 
 #[derive(Debug)]
 pub enum Expr {
+    ParenExpr(ParenExpr),
     UnaryOp(UnaryOp),
     BinOp(BinOp),
     Primary(Primary),
@@ -332,6 +356,7 @@ impl Expr {
 
         Some(match inner.kind() {
             ExprNode => Self::cast(inner.first_child()?)?,
+            ParenExprNode => Self::ParenExpr(ParenExpr::cast(inner)?),
             UnaryOpNode => Self::UnaryOp(UnaryOp::cast(inner)?),
             BinOpNode => Self::BinOp(BinOp::cast(inner)?),
             PrimaryExprNode => Self::Primary(Primary::cast(inner)?),
@@ -344,10 +369,26 @@ impl Expr {
         use Expr::*;
 
         match self {
+            ParenExpr(expr) => expr.start(),
             UnaryOp(op) => op.start(),
             BinOp(op) => op.start(),
             Primary(p) => p.start(),
             Call(c) => c.start(),
+        }
+    }
+
+    pub fn is_valid_place(&self) -> bool {
+        match self {
+            Expr::Primary(Primary::Identifier(_)) => true,
+            Expr::BinOp(binop) if binop.kind() == BinOpKind::Dot => {
+                let mut operands = binop.operands();
+                let _lhs = match operands.next() {
+                    Some(lhs) => lhs,
+                    None => return false,
+                };
+                matches!(operands.next(), Some(Expr::Primary(Primary::Identifier(_))))
+            }
+            _ => false,
         }
     }
 }

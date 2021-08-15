@@ -102,6 +102,7 @@ pub enum SyntaxKind {
 
     // nodes
     // expressions
+    ParenExprNode,
     UnaryOpNode,
     BinOpNode,
     PrimaryExprNode,

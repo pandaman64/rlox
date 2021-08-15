@@ -3,6 +3,8 @@ use std::{collections::HashMap, iter::Peekable, ops::Range};
 use once_cell::sync::Lazy;
 use rowan::GreenNodeBuilder;
 
+use crate::ast::{BinOp, BinOpKind};
+
 use super::{lexer::lex, SyntaxKind, SyntaxNode};
 
 #[derive(Debug)]
@@ -27,6 +29,9 @@ pub enum SyntaxError {
     },
     ExpectIdentifier {
         got: SyntaxKind,
+        position: usize,
+    },
+    InvalidAssignment {
         position: usize,
     },
 }
@@ -172,7 +177,7 @@ where
                         self.builder.finish_node();
                     }
                     ParenOpenToken => {
-                        self.builder.start_node(ExprNode.into());
+                        self.builder.start_node(ParenExprNode.into());
                         self.bump();
                         self.parse_expr(Zero);
                         self.expect(ParenCloseToken);
@@ -424,7 +429,22 @@ where
         self.builder.finish_node();
 
         let root = SyntaxNode::new_root(self.builder.finish());
-        let errors = self.errors;
+        let mut errors = self.errors;
+
+        // syntactic check for assignments
+        for descendant in root.descendants() {
+            if let Some(binop) = BinOp::cast(descendant) {
+                if binop.kind() == BinOpKind::Assignment {
+                    if let Some(lhs) = binop.operands().next() {
+                        if !lhs.is_valid_place() {
+                            errors.push(SyntaxError::InvalidAssignment {
+                                position: binop.start(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
 
         (root, errors)
     }
