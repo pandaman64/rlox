@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     io::{self, Write},
-    mem::discriminant,
     ptr,
 };
 
@@ -723,10 +722,6 @@ impl<'w> Vm<'w> {
                     let v2 = try_pop!(self);
                     let v1 = try_pop!(self);
 
-                    if discriminant(&v1) != discriminant(&v2) {
-                        eprintln!("type mismatch in equality operation");
-                        return InterpretResult::RuntimeError;
-                    }
                     // SAFETY: v1 and v2 are valid object
                     let eq = unsafe { v1.eq(&v2) };
                     self.stack.push(Value::Bool(eq));

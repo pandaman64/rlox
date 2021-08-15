@@ -86,6 +86,7 @@ impl Value {
             (Bool(b1), Bool(b2)) => b1 == b2,
             (Number(n1), Number(n2)) => n1 == n2,
             (Object(o1), Object(o2)) => {
+                // TODO: we can probably just compare pointers without looking at the header
                 // SAFETY: these objects are valid
                 match unsafe { (object::as_ref(*o1), object::as_ref(*o2)) } {
                     // strings are interned
