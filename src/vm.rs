@@ -771,7 +771,7 @@ impl<'w> Vm<'w> {
                                     self.stack.push(Value::Object(obj.into_raw_obj()));
                                 }
                                 _ => {
-                                    eprintln!("type mismatch in addition");
+                                    eprintln!("Operands must be two numbers or two strings.");
                                     return InterpretResult::RuntimeError;
                                 }
                             }
@@ -780,7 +780,7 @@ impl<'w> Vm<'w> {
                             binop!(self, +, Number);
                         }
                         [_v2, _v1] => {
-                            eprintln!("type mismatch in addition");
+                            eprintln!("Operands must be two numbers or two strings.");
                             return InterpretResult::RuntimeError;
                         }
                         _ => unreachable!(),
