@@ -2,11 +2,7 @@
 // #![warn(unreachable_pub)]
 
 use clap::Clap;
-use std::{
-    fs,
-    io::{self, BufRead},
-    path::PathBuf,
-};
+use std::{fs, io::{self, BufRead}, path::PathBuf, process};
 
 use rlox::{
     ast::Root,
@@ -95,12 +91,12 @@ struct Opts {
     file_name: Option<PathBuf>,
 }
 
-fn main() -> std::io::Result<()> {
+fn main() {
     let opts = Opts::parse();
 
-    match opts.file_name {
+    let result = match opts.file_name {
         Some(file_name) => {
-            let input = fs::read_to_string(file_name)?;
+            let input = fs::read_to_string(file_name).unwrap();
             let stdout = std::io::stdout();
             let stdout = stdout.lock();
             run(&input, stdout)
@@ -110,5 +106,9 @@ fn main() -> std::io::Result<()> {
             let stdin = stdin.lock();
             repl(stdin)
         }
+    };
+
+    if result.is_err() {
+        process::exit(70)
     }
 }

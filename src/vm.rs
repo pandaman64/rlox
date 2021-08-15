@@ -609,7 +609,7 @@ impl<'w> Vm<'w> {
                     let value = match objects.globals.get(&key) {
                         Some(value) => value,
                         None => {
-                            eprintln!("undefined variable: {}", key.display());
+                            eprintln!("Undefined variable '{}'.", key.display());
                             return InterpretResult::RuntimeError;
                         }
                     };
