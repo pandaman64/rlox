@@ -520,7 +520,7 @@ impl<'w> Vm<'w> {
                         Some(v) => {
                             // SAFETY: v is a valid value
                             unsafe {
-                                if write!(self.stdout, "{}", v.format_args()).is_err() {
+                                if writeln!(self.stdout, "{}", v.format_args()).is_err() {
                                     return InterpretResult::RuntimeError;
                                 }
                             }
