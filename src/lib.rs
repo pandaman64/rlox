@@ -112,7 +112,7 @@ pub fn print_codegen_error(error: &CodegenError, root: &SyntaxNode, line_map: &L
             let line = line_map.resolve(position);
             let token = root.token_at_offset(position.try_into().unwrap());
             eprint!("[line {}] Error at ", line);
-            match token.right_biased() {
+            match token.left_biased() {
                 Some(token) => eprint!("'{}'", token.text()),
                 None => eprint!("end"),
             }

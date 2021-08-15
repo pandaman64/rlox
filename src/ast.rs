@@ -7,15 +7,6 @@ fn first_nontirivial_token(node: &SyntaxNode) -> Option<SyntaxToken> {
     })
 }
 
-fn last_nontirivial_token(node: &SyntaxNode) -> Option<SyntaxToken> {
-    node.descendants_with_tokens()
-        .filter_map(|child| match child {
-            NodeOrToken::Token(token) if !token.kind().is_trivial() => Some(token),
-            _ => None,
-        })
-        .last()
-}
-
 fn try_as_ident(child: NodeOrToken) -> Option<Identifier> {
     match child {
         NodeOrToken::Token(token) => Identifier::cast(token),
@@ -41,15 +32,8 @@ impl ParenExpr {
         self.inner.text_range().start().into()
     }
 
-    /// Returns the start position of the last non-trivial token if exists.
-    /// Returns the position after this node.
     pub fn end(&self) -> usize {
-        last_nontirivial_token(&self.inner)
-            .map_or_else(
-                || self.inner.text_range().end(),
-                |token| token.text_range().start(),
-            )
-            .into()
+        self.inner.text_range().end().into()
     }
 
     pub fn expr(&self) -> Option<Expr> {
@@ -81,15 +65,8 @@ impl UnaryOp {
         self.inner.text_range().start().into()
     }
 
-    /// Returns the start position of the last non-trivial token if exists.
-    /// Returns the position after this node.
     pub fn end(&self) -> usize {
-        last_nontirivial_token(&self.inner)
-            .map_or_else(
-                || self.inner.text_range().end(),
-                |token| token.text_range().start(),
-            )
-            .into()
+        self.inner.text_range().end().into()
     }
 
     fn first_token(&self) -> Option<SyntaxToken> {
@@ -145,15 +122,8 @@ impl BinOp {
         self.inner.text_range().start().into()
     }
 
-    /// Returns the start position of the last non-trivial token if exists.
-    /// Returns the position after this node.
     pub fn end(&self) -> usize {
-        last_nontirivial_token(&self.inner)
-            .map_or_else(
-                || self.inner.text_range().end(),
-                |token| token.text_range().start(),
-            )
-            .into()
+        self.inner.text_range().end().into()
     }
 
     fn first_token(&self) -> Option<SyntaxToken> {
@@ -206,6 +176,10 @@ impl Identifier {
         self.inner.text_range().start().into()
     }
 
+    pub fn end(&self) -> usize {
+        self.inner.text_range().end().into()
+    }
+
     pub fn to_str(&self) -> &str {
         self.inner.text()
     }
@@ -227,6 +201,10 @@ impl StringLiteral {
 
     pub fn start(&self) -> usize {
         self.inner.text_range().start().into()
+    }
+
+    pub fn end(&self) -> usize {
+        self.inner.text_range().end().into()
     }
 
     pub fn to_str(&self) -> &str {
@@ -254,6 +232,10 @@ impl NumberLiteral {
         self.inner.text_range().start().into()
     }
 
+    pub fn end(&self) -> usize {
+        self.inner.text_range().end().into()
+    }
+
     pub fn to_number(&self) -> f64 {
         self.inner.text().parse().unwrap()
     }
@@ -276,6 +258,10 @@ impl NilLiteral {
     pub fn start(&self) -> usize {
         self.inner.text_range().start().into()
     }
+
+    pub fn end(&self) -> usize {
+        self.inner.text_range().end().into()
+    }
 }
 
 #[derive(Debug)]
@@ -294,6 +280,10 @@ impl BooleanLiteral {
 
     pub fn start(&self) -> usize {
         self.inner.text_range().start().into()
+    }
+
+    pub fn end(&self) -> usize {
+        self.inner.text_range().end().into()
     }
 
     pub fn to_boolean(&self) -> bool {
@@ -345,12 +335,16 @@ impl Primary {
         }
     }
 
-    /// Returns the start position of the last non-trivial token if exists.
-    /// Returns the position after this node.
     pub fn end(&self) -> usize {
-        // since primary expression consists of only one token,
-        // we can return the start position of the token.
-        self.start()
+        use Primary::*;
+
+        match self {
+            Identifier(ident) => ident.end(),
+            NilLiteral(nil) => nil.end(),
+            BooleanLiteral(boolean) => boolean.end(),
+            StringLiteral(string) => string.end(),
+            NumberLiteral(number) => number.end(),
+        }
     }
 }
 
@@ -372,15 +366,8 @@ impl CallExpr {
         self.inner.text_range().start().into()
     }
 
-    /// Returns the start position of the last non-trivial token if exists.
-    /// Returns the position after this node.
     pub fn end(&self) -> usize {
-        last_nontirivial_token(&self.inner)
-            .map_or_else(
-                || self.inner.text_range().end(),
-                |token| token.text_range().start(),
-            )
-            .into()
+        self.inner.text_range().end().into()
     }
 
     pub fn function(&self) -> Option<Expr> {
@@ -662,15 +649,8 @@ impl IfStmt {
         self.inner.text_range().start().into()
     }
 
-    /// Returns the start position of the last non-trivial token if exists.
-    /// Returns the position after this node.
     pub fn end(&self) -> usize {
-        last_nontirivial_token(&self.inner)
-            .map_or_else(
-                || self.inner.text_range().end(),
-                |token| token.text_range().start(),
-            )
-            .into()
+        self.inner.text_range().end().into()
     }
 
     pub fn cond(&self) -> Option<Expr> {
@@ -700,15 +680,8 @@ impl WhileStmt {
         self.inner.text_range().start().into()
     }
 
-    /// Returns the start position of the last non-trivial token if exists.
-    /// Returns the position after this node.
     pub fn end(&self) -> usize {
-        last_nontirivial_token(&self.inner)
-            .map_or_else(
-                || self.inner.text_range().end(),
-                |token| token.text_range().start(),
-            )
-            .into()
+        self.inner.text_range().end().into()
     }
 
     pub fn cond(&self) -> Option<Expr> {
@@ -802,15 +775,8 @@ impl ForStmt {
         self.inner.text_range().start().into()
     }
 
-    /// Returns the start position of the last non-trivial token if exists.
-    /// Returns the position after this node.
     pub fn end(&self) -> usize {
-        last_nontirivial_token(&self.inner)
-            .map_or_else(
-                || self.inner.text_range().end(),
-                |token| token.text_range().start(),
-            )
-            .into()
+        self.inner.text_range().end().into()
     }
 
     pub fn init(&self) -> Option<ForInit> {
