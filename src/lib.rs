@@ -12,6 +12,7 @@ pub mod value;
 pub mod vm;
 
 use std::{
+    convert::TryInto,
     io::{self, Write},
     sync::{
         atomic::{self, AtomicBool},
@@ -24,7 +25,7 @@ use codegen::{CodegenError, Compiler};
 use line_map::LineMap;
 use object::NativeFunction;
 use regex::Regex;
-use syntax::SyntaxError;
+use syntax::{SyntaxError, SyntaxNode};
 use vm::Vm;
 
 use crate::vm::InterpretResult;
@@ -49,7 +50,7 @@ pub fn trace_available() -> bool {
     AVAILABLE.load(atomic::Ordering::Relaxed)
 }
 
-pub fn print_syntax_error(error: &SyntaxError, input: &str, line_map: &LineMap) {
+pub fn print_syntax_error(error: &SyntaxError, root: &SyntaxNode, line_map: &LineMap) {
     use SyntaxError::*;
 
     match error {
@@ -58,10 +59,12 @@ pub fn print_syntax_error(error: &SyntaxError, input: &str, line_map: &LineMap) 
             eprintln!("[line {}] Error: Unterminated string.", line);
         }
         ExpectNode { name, position } => {
-            let line = line_map.resolve(*position);
+            let position = *position;
+            let line = line_map.resolve(position);
+            let token = root.token_at_offset(position.try_into().unwrap());
             eprint!("[line {}] Error at ", line);
-            match input[*position..].chars().next() {
-                Some(c) => eprint!("'{}'", c),
+            match token.right_biased() {
+                Some(c) => eprint!("'{}'", c.text()),
                 None => eprint!("end"),
             }
             eprintln!(": Expect {}.", name);
@@ -137,7 +140,7 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
     }
     if !errors.is_empty() {
         for error in errors {
-            print_syntax_error(&error, input, &line_map);
+            print_syntax_error(&error, &node, &line_map);
         }
         return Err(Error::Syntax);
     }

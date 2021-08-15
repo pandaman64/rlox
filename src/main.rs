@@ -55,7 +55,7 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
         }
         if !errors.is_empty() {
             for error in errors {
-                rlox::print_syntax_error(&error, &line, &line_map);
+                rlox::print_syntax_error(&error, &node, &line_map);
             }
             continue;
         }
