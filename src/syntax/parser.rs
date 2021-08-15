@@ -25,6 +25,10 @@ pub enum SyntaxError {
         name: &'static str,
         position: usize,
     },
+    ExpectIdentifier {
+        got: SyntaxKind,
+        position: usize,
+    },
 }
 
 pub struct Parser<'i, I: Iterator<Item = (SyntaxKind, &'i str, Range<usize>)>> {
@@ -129,11 +133,20 @@ where
     fn expect(&mut self, expected: SyntaxKind) {
         match self.peek() {
             Some(token) if token == expected => self.bump(),
-            Some(got) => self.errors.push(SyntaxError::UnexpectedToken {
-                expected,
-                got,
-                position: self.position,
-            }),
+            Some(got) => {
+                if expected == SyntaxKind::IdentifierToken && got.is_keyword() {
+                    self.errors.push(SyntaxError::ExpectIdentifier {
+                        got,
+                        position: self.position,
+                    })
+                } else {
+                    self.errors.push(SyntaxError::UnexpectedToken {
+                        expected,
+                        got,
+                        position: self.position,
+                    });
+                }
+            }
             None => self.errors.push(SyntaxError::UnexpectedEof { expected }),
         }
     }

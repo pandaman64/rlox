@@ -145,6 +145,34 @@ impl SyntaxKind {
 
         matches!(self, WhitespaceToken | CommentToken | Error)
     }
+
+    pub fn is_keyword(&self) -> bool {
+        self.to_keyword_str().is_some()
+    }
+
+    pub fn to_keyword_str(&self) -> Option<&'static str> {
+        use SyntaxKind::*;
+
+        match self {
+            AndToken => Some("and"),
+            ClassToken => Some("class"),
+            ElseToken => Some("else"),
+            FalseToken => Some("false"),
+            ForToken => Some("for"),
+            FunToken => Some("fun"),
+            IfToken => Some("if"),
+            NilToken => Some("nil"),
+            OrToken => Some("or"),
+            PrintToken => Some("print"),
+            ReturnToken => Some("return"),
+            SuperToken => Some("super"),
+            ThisToken => Some("this"),
+            TrueToken => Some("true"),
+            VarToken => Some("var"),
+            WhileToken => Some("while"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

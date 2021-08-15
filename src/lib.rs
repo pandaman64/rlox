@@ -65,6 +65,14 @@ pub fn print_syntax_error(error: &SyntaxError, input: &str, line_map: &LineMap) 
             }
             eprintln!(": Expect {}.", name);
         }
+        ExpectIdentifier { got, position } => {
+            let line = line_map.resolve(*position);
+            eprintln!(
+                "[line {}] Error at '{}': Expect variable name.",
+                line,
+                got.to_keyword_str().unwrap()
+            );
+        }
         _ => {
             // TODO: adjust error message
             // eprintln!("{:?}", error);
