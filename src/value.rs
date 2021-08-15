@@ -41,7 +41,8 @@ impl fmt::Display for ValueDisplay<'_> {
     }
 }
 
-/// SAFETY: `obj` must be a (recursively) valid object.
+/// # Safety
+/// `obj` must be a (recursively) valid object.
 pub unsafe fn format_obj<'obj>(obj: RawObject) -> ValueDisplay<'obj> {
     // SAFETY: this object is valid, so the type must match the runtime representation
     match unsafe { object::as_ref(obj) } {
@@ -59,7 +60,8 @@ pub unsafe fn format_obj<'obj>(obj: RawObject) -> ValueDisplay<'obj> {
 }
 
 impl Value {
-    /// SAFETY: `self` must be a valid object (initialized and not freed).
+    /// # Safety
+    /// `self` must be a valid object (initialized and not freed).
     pub unsafe fn format_args(&self) -> ValueDisplay<'_> {
         use Value::*;
 
@@ -74,7 +76,8 @@ impl Value {
         }
     }
 
-    /// SAFETY: `self` and `other` must be valid objects (initialized and not freed).
+    /// # Safety
+    /// `self` and `other` must be valid objects (initialized and not freed).
     pub unsafe fn eq(&self, other: &Self) -> bool {
         use Value::*;
 

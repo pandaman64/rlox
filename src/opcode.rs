@@ -42,6 +42,7 @@ pub enum OpCode {
     Call,
 }
 
+#[derive(Default)]
 pub struct Chunk {
     // invariant: code.len() == line.len()
     code: Vec<u8>,
@@ -51,11 +52,7 @@ pub struct Chunk {
 
 impl Chunk {
     pub fn new() -> Self {
-        Self {
-            code: vec![],
-            line: vec![],
-            constants: vec![],
-        }
+        Self::default()
     }
 }
 
@@ -64,7 +61,8 @@ fn trace_simple_code(offset: usize, s: &str) -> usize {
     offset + 1
 }
 
-/// SAFETY: constants in chunk must be valid
+/// Safety
+/// constants in chunk must be valid
 unsafe fn trace_constant_code(chunk: &Chunk, offset: usize, s: &str) -> usize {
     let constant_index = usize::from(chunk.code[offset + 1]);
     eprintln!("{:-16} {:4} '{}'", s, constant_index, unsafe {
@@ -183,7 +181,8 @@ impl Chunk {
         }
     }
 
-    /// SAFETY: constants in this chunk must be valid
+    /// # Safety
+    /// constants in this chunk must be valid
     pub unsafe fn trace_chunk<N: fmt::Display>(&self, name: N) {
         if trace_available() {
             eprintln!("== {} ==", name);

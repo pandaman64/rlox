@@ -90,7 +90,8 @@ impl Objects {
         }
     }
 
-    /// SAFETY: `obj` must points to an initialized object.
+    /// # Safety
+    /// `obj` must points to an initialized object.
     /// `obj.next` must not point to another valid object. Otherwise, the object can be leaked.
     unsafe fn add_object_head(&mut self, obj: RawObject) {
         // SAFETY: obj is initialized
@@ -104,7 +105,8 @@ impl Objects {
         }
     }
 
-    /// SAFETY: no chunks referring to objects managed by this vm can be run after calling free_objects
+    /// # Safety
+    /// no chunks referring to objects managed by this vm can be run after calling free_objects
     pub unsafe fn free_all_objects(&mut self) {
         self.strings.clear();
         self.globals.clear();
@@ -211,7 +213,8 @@ fn allocate_object<T>(obj: T) -> RawObject {
     RawObject::new(obj_ptr as _).unwrap()
 }
 
-/// SAFETY: obj must be valid and allocated by allocate_object
+/// # Safety
+/// obj must be valid and allocated by allocate_object
 unsafe fn free_object(obj: RawObject) -> Option<RawObject> {
     unsafe {
         // SAFETY:
@@ -245,7 +248,8 @@ unsafe fn free_object(obj: RawObject) -> Option<RawObject> {
     }
 }
 
-/// SAFETY: the objects and the frame must be valid
+/// # Safety
+/// the objects and the frame must be valid
 unsafe fn capture_upvalue(
     objects: &mut Objects,
     frame: &mut CallFrame,
@@ -294,7 +298,8 @@ unsafe fn capture_upvalue(
     Ok(upvalue_obj)
 }
 
-/// SAFETY: the objects and stack must be valid
+/// # Safety
+/// the objects and stack must be valid
 unsafe fn close_upvalue(objects: &mut Objects, stack: &[Value], stack_index: usize) {
     // SAFETY: the objects and stack are valid
     unsafe {
@@ -311,13 +316,19 @@ unsafe fn close_upvalue(objects: &mut Objects, stack: &[Value], stack_index: usi
     }
 }
 
-impl Vm {
-    pub fn new() -> Self {
+impl Default for Vm {
+    fn default() -> Self {
         Self {
             stack: vec![],
             frames: vec![],
             objects: Objects::new(),
         }
+    }
+}
+
+impl Vm {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn objects_mut(&mut self) -> &mut Objects {
@@ -414,7 +425,8 @@ impl Vm {
         }
     }
 
-    /// SAFETY: stack and frames must be valid
+    /// # Safety
+    /// stack and frames must be valid
     pub unsafe fn print_stack_trace(&self) {
         for frame in self.frames.iter().rev() {
             // SAFETY: the frame contains valid pointer to a closure
@@ -435,7 +447,8 @@ impl Vm {
         }
     }
 
-    /// SAFETY: stack and frames must be valid
+    /// # Safety
+    /// stack and frames must be valid
     pub unsafe fn run(&mut self) -> InterpretResult {
         use std::collections::hash_map::Entry;
         use OpCode::*;

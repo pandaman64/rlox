@@ -39,7 +39,8 @@ pub enum ObjectRef<'a> {
     Upvalue(*const Upvalue),
 }
 
-/// SAFETY: the object must be initialized and its kind must match the runtime representation.
+/// # Safety
+/// the object must be initialized and its kind must match the runtime representation.
 pub unsafe fn as_ref<'a>(obj: RawObject) -> ObjectRef<'a> {
     unsafe {
         let obj = obj.as_ptr();
@@ -152,7 +153,8 @@ impl Function {
         &mut self.chunk
     }
 
-    /// SAFETY: self must be a valid function
+    /// # Safety
+    /// self must be a valid function
     pub unsafe fn trace(&self) {
         let chunk = &self.chunk;
         // SAFETY: self is a valid function, so the chunk and name is valid too
@@ -197,7 +199,8 @@ pub struct Closure {
 }
 
 impl Closure {
-    /// SAFETY: function must point to valid function
+    /// # Safety
+    /// function must point to valid function
     pub unsafe fn new(function: RawFunction) -> Self {
         // SAFETY: given function is valid
         let num_upvalues = unsafe { function.as_ref().upvalues() };

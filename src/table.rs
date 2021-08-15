@@ -32,7 +32,8 @@ impl Hash for InternedStr {
 }
 
 impl InternedStr {
-    /// SAFETY: s must point to a valid string
+    /// # Safety
+    /// s must point to a valid string
     pub unsafe fn new(s: RawStr) -> Self {
         Self(s)
     }

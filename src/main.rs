@@ -1,36 +1,15 @@
 #![deny(rust_2018_idioms, unsafe_op_in_unsafe_fn)]
 // #![warn(unreachable_pub)]
 
-mod ast;
-mod codegen;
-mod object;
-mod opcode;
-mod syntax;
-mod table;
-mod value;
-mod vm;
+use std::io::{BufRead, Write};
 
-use std::{
-    io::{BufRead, Write},
-    sync::{
-        atomic::{self, AtomicBool},
-        Once,
-    },
+use rlox::{
+    ast::Root,
+    codegen::Compiler,
+    object::NativeFunction,
+    trace_available,
+    vm::{InterpretResult, Vm},
 };
-use vm::Vm;
-
-use crate::{ast::Root, codegen::Compiler, object::NativeFunction, vm::InterpretResult};
-
-pub fn trace_available() -> bool {
-    static AVAILABLE: AtomicBool = AtomicBool::new(false);
-    static ONCE: Once = Once::new();
-
-    ONCE.call_once(|| {
-        let config = matches!(std::env::var("RUST_LOG"), Ok(s) if s == "trace");
-        AVAILABLE.store(config, atomic::Ordering::Relaxed);
-    });
-    AVAILABLE.load(atomic::Ordering::Relaxed)
-}
 
 fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
     // std::env::set_var("RUST_LOG", "trace");
@@ -39,7 +18,7 @@ fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
     vm.define_native_function(
         "clock".into(),
         NativeFunction::new(|_args| {
-            use crate::value::Value;
+            use rlox::value::Value;
             use std::time::*;
 
             let now = SystemTime::now();
@@ -61,7 +40,7 @@ fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
             break;
         }
 
-        let node = syntax::parse(&line);
+        let node = rlox::syntax::parse(&line);
         if trace_available() {
             eprintln!("{:#?}", node);
         }
