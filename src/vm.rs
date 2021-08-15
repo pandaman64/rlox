@@ -441,12 +441,12 @@ impl<'w> Vm<'w> {
 
                 // ip is incremented already
                 eprint!(
-                    "while evaluating line {}, ",
+                    "[line {}] in ",
                     function.chunk().line()[frame.ip - 1]
                 );
                 match function.name() {
-                    Some(name) => eprintln!("function {}", name.display()),
-                    None => eprintln!("top-level script"),
+                    Some(name) => eprintln!("{}()", name.display()),
+                    None => eprintln!("script"),
                 }
             }
         }
