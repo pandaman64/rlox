@@ -369,7 +369,7 @@ impl<'w> Vm<'w> {
         let callee = *match self.stack.get(bp) {
             Some(Value::Object(callee)) => callee,
             Some(_) => {
-                eprintln!("callee must be an object");
+                eprintln!("Can only call functions and classes.");
                 return false;
             }
             None => {
@@ -406,11 +406,11 @@ impl<'w> Vm<'w> {
                 true
             }
             ObjectRef::Function(_function) => {
-                eprintln!("cannot call bare function");
+                eprintln!("Can only call functions and classes.");
                 false
             }
             ObjectRef::Str(_) | ObjectRef::Upvalue(_) => {
-                eprintln!("callee must be a function");
+                eprintln!("Can only call functions and classes.");
                 false
             }
         }
