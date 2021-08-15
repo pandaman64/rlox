@@ -2,7 +2,7 @@ use std::process::Command;
 
 #[test]
 fn test_corpus() {
-    let test = "chap21_global";
+    let test = "chap22_local";
     let success = Command::new("dart")
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .args(["tool/bin/test.dart", test, "-i", "target/debug/rlox"])

@@ -20,7 +20,7 @@ use std::{
 };
 
 use ast::Root;
-use codegen::Compiler;
+use codegen::{CodegenError, Compiler};
 use line_map::LineMap;
 use object::NativeFunction;
 use regex::Regex;
@@ -34,6 +34,7 @@ pub enum Error {
     Input(io::Error),
     Output(io::Error),
     Syntax,
+    Codegen,
     Runtime,
 }
 
@@ -84,6 +85,28 @@ pub fn print_syntax_error(error: &SyntaxError, input: &str, line_map: &LineMap) 
     }
 }
 
+pub fn print_codegen_error(error: &CodegenError, line_map: &LineMap) {
+    use CodegenError::*;
+
+    match error {
+        ShadowingInSameScope { ident, position } => {
+            let line = line_map.resolve(*position);
+            eprintln!(
+                "[line {}] Error at '{}': Already a variable with this name in this scope.",
+                line, ident
+            );
+        }
+        UnassignedLocal { ident } => {
+            let line = line_map.resolve(ident.start());
+            eprintln!(
+                "[line {}] Error at '{}': Can't read local variable in its own initializer.",
+                line,
+                ident.to_str()
+            );
+        }
+    }
+}
+
 pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
     let mut vm = Vm::new(&mut stdout);
     vm.define_native_function(
@@ -127,10 +150,16 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
 
     // SAFETY: we construct a chunk with valid constants
     let result = unsafe {
-        let (function, upvalues) = match compiler.finish() {
+        let (function, upvalues, errors) = match compiler.finish() {
             Some(v) => v,
             None => return Ok(()),
         };
+        if !errors.is_empty() {
+            for error in errors {
+                print_codegen_error(&error, &line_map);
+            }
+            return Err(Error::Codegen);
+        }
         assert!(upvalues.is_empty());
         function.trace();
 

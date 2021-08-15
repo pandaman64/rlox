@@ -74,10 +74,16 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
         };
         // SAFETY: we construct a chunk with valid constants
         unsafe {
-            let (function, upvalues) = match compiler.finish() {
+            let (function, upvalues, errors) = match compiler.finish() {
                 Some(v) => v,
                 None => continue,
             };
+            if !errors.is_empty() {
+                for error in errors {
+                    rlox::print_codegen_error(&error, &line_map);
+                }
+                continue;
+            }
             assert!(upvalues.is_empty());
             function.trace();
 
@@ -121,8 +127,8 @@ fn main() {
 
     match result {
         Ok(()) => process::exit(0),
-        Err(rlox::Error::Syntax) => process::exit(65),
+        Err(rlox::Error::Syntax | rlox::Error::Codegen) => process::exit(65),
         Err(rlox::Error::Runtime) => process::exit(70),
-        Err(_) => process::exit(999),
+        Err(_) => process::exit(101),
     }
 }

@@ -16,6 +16,13 @@ use crate::{
 };
 
 const GLOBAL_BLOCK: usize = 0;
+const UNASSIGNED: usize = usize::MAX;
+
+#[derive(Debug)]
+pub enum CodegenError {
+    ShadowingInSameScope { ident: String, position: usize },
+    UnassignedLocal { ident: Identifier },
+}
 
 struct Local {
     ident: String,
@@ -43,6 +50,7 @@ pub struct Compiler<'parent, 'map> {
     block_depth: usize,
     line_map: &'map LineMap,
     return_position: Option<usize>,
+    errors: RefCell<Vec<CodegenError>>,
 }
 
 fn new_locals() -> Vec<Local> {
@@ -67,6 +75,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             block_depth: 0,
             line_map,
             return_position: None,
+            errors: RefCell::new(vec![]),
         }
     }
 
@@ -86,36 +95,48 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             block_depth: 0,
             line_map,
             return_position: Some(return_position),
+            errors: RefCell::new(vec![]),
         }
     }
 
     /// - Returns `Some((function, upvalues))` if the code contains at least one declaration.
     /// - Returns `None` if the code does not contain any declaration.
-    pub fn finish(mut self) -> Option<(Function, Vec<Upvalue>)> {
+    pub fn finish(mut self) -> Option<(Function, Vec<Upvalue>, Vec<CodegenError>)> {
         let return_position = self.return_position?;
         self.gen_return(return_position);
-        Some((self.function, self.upvalues.into_inner()))
+        Some((
+            self.function,
+            self.upvalues.into_inner(),
+            self.errors.into_inner(),
+        ))
     }
 
-    fn push_local(&mut self, ident: &str) {
+    fn push_local(&mut self, ident: Identifier) {
         assert!(
             self.locals.len() < 256,
             "more than 255 local variables are not supported"
         );
 
+        let name = ident.to_str();
         for local in self.locals.iter().rev() {
             if local.depth != self.block_depth {
                 break;
             }
 
-            if local.ident == ident {
-                todo!("shadowing in the same scope is not supported: {}", ident);
+            if local.ident == name {
+                self.errors
+                    .get_mut()
+                    .push(CodegenError::ShadowingInSameScope {
+                        ident: name.into(),
+                        position: ident.start(),
+                    });
+                break;
             }
         }
 
         self.locals.push(Local {
-            ident: ident.into(),
-            depth: usize::MAX,
+            ident: name.into(),
+            depth: UNASSIGNED,
             captured: Cell::new(false),
         });
     }
@@ -139,18 +160,20 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         self.block_depth -= 1;
     }
 
-    fn resolve_local(&self, ident: &str) -> Option<usize> {
+    fn resolve_local(&self, ident: Identifier) -> Option<usize> {
         self.locals
             .iter()
             .enumerate()
             .rev()
             .find(|(_, local)| {
-                if local.ident == ident {
-                    assert_ne!(
-                        local.depth,
-                        usize::MAX,
-                        "initializer of local variable cannot read the local"
-                    );
+                if local.ident == ident.to_str() {
+                    if local.depth == UNASSIGNED {
+                        self.errors
+                            .borrow_mut()
+                            .push(CodegenError::UnassignedLocal {
+                                ident: ident.clone(),
+                            });
+                    }
                     true
                 } else {
                     false
@@ -179,9 +202,9 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         ret
     }
 
-    fn resolve_upvalue(&self, ident: &str) -> Option<usize> {
+    fn resolve_upvalue(&self, ident: Identifier) -> Option<usize> {
         let parent = self.parent?;
-        match parent.resolve_local(ident) {
+        match parent.resolve_local(ident.clone()) {
             Some(local) => {
                 parent.locals[local].captured.set(true);
                 Some(self.add_upvalue(u8::try_from(local).unwrap(), true))
@@ -194,9 +217,9 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     }
 
     fn resolve(&mut self, vm: &mut Vm<'_>, ident: Identifier) -> (OpCode, OpCode, u8) {
-        if let Some(i) = self.resolve_local(ident.to_str()) {
+        if let Some(i) = self.resolve_local(ident.clone()) {
             (OpCode::GetLocal, OpCode::SetLocal, u8::try_from(i).unwrap())
-        } else if let Some(i) = self.resolve_upvalue(ident.to_str()) {
+        } else if let Some(i) = self.resolve_upvalue(ident.clone()) {
             (
                 OpCode::GetUpvalue,
                 OpCode::SetUpvalue,
@@ -262,7 +285,6 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 self.gen_expr(vm, target);
                 (true, ident)
             }
-            // TODO: emit error message
             _ => unreachable!("place expression must be an identifier or dot expression"),
         }
     }
@@ -533,7 +555,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     {
         if self.block_depth > GLOBAL_BLOCK {
             let idx = self.locals.len();
-            self.push_local(ident.to_str());
+            self.push_local(ident);
             gen_value(self, vm);
             assert_eq!(idx + 1, self.locals.len());
             self.locals[idx].depth = self.block_depth;
@@ -580,13 +602,14 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 );
                 compiler.begin_block();
                 for param in decl.params() {
-                    compiler.push_local(param.to_str());
+                    compiler.push_local(param);
                     compiler.locals.last_mut().unwrap().depth = compiler.block_depth;
                 }
                 compiler.gen_block_stmt(vm, decl.body().unwrap());
                 compiler.end_block(decl.start());
-                let (mut function, upvalues) = compiler.finish().unwrap();
+                let (mut function, upvalues, errors) = compiler.finish().unwrap();
                 *function.upvalues_mut() = u8::try_from(upvalues.len()).unwrap();
+                self.errors.get_mut().extend(errors);
                 let fun_obj = vm.objects_mut().allocate_function(function);
 
                 self.define_variable(vm, decl.ident().unwrap(), move |this, _vm| {
