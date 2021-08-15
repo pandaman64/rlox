@@ -1,13 +1,14 @@
 #![deny(rust_2018_idioms, unsafe_op_in_unsafe_fn)]
 // #![warn(unreachable_pub)]
 
-use std::io::BufRead;
+use clap::Clap;
+use std::{fs, io::BufRead, path::PathBuf};
 
 use rlox::{
     ast::Root,
     codegen::Compiler,
     object::NativeFunction,
-    trace_available,
+    run, trace_available,
     vm::{InterpretResult, Vm},
 };
 
@@ -79,8 +80,25 @@ fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
     Ok(())
 }
 
+#[derive(Clap)]
+struct Opts {
+    file_name: Option<PathBuf>,
+}
+
 fn main() -> std::io::Result<()> {
-    let stdin = std::io::stdin();
-    let stdin = stdin.lock();
-    repl(stdin)
+    let opts = Opts::parse();
+
+    match opts.file_name {
+        Some(file_name) => {
+            let input = fs::read_to_string(file_name)?;
+            let stdout = std::io::stdout();
+            let stdout = stdout.lock();
+            run(&input, stdout)
+        }
+        None => {
+            let stdin = std::io::stdin();
+            let stdin = stdin.lock();
+            repl(stdin)
+        }
+    }
 }
