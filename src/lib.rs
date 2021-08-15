@@ -82,7 +82,10 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> io::Result<()> {
 
     // SAFETY: we construct a chunk with valid constants
     let result = unsafe {
-        let (function, upvalues) = compiler.finish();
+        let (function, upvalues) = match compiler.finish() {
+            Some(v) => v,
+            None => return Ok(()),
+        };
         assert!(upvalues.is_empty());
         function.trace();
 

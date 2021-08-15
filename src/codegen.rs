@@ -75,6 +75,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         name: InternedStr,
         arity: u8,
         line_map: &'map LineMap,
+        return_position: usize,
     ) -> Self {
         Self {
             parent: Some(parent),
@@ -84,13 +85,16 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             upvalues: RefCell::new(vec![]),
             block_depth: 0,
             line_map,
-            return_position: None,
+            return_position: Some(return_position),
         }
     }
 
-    pub fn finish(mut self) -> (Function, Vec<Upvalue>) {
-        self.gen_return(self.return_position.unwrap());
-        (self.function, self.upvalues.into_inner())
+    /// - Returns `Some((function, upvalues))` if the code contains at least one declaration.
+    /// - Returns `None` if the code does not contain any declaration.
+    pub fn finish(mut self) -> Option<(Function, Vec<Upvalue>)> {
+        let return_position = self.return_position?;
+        self.gen_return(return_position);
+        Some((self.function, self.upvalues.into_inner()))
     }
 
     fn push_local(&mut self, ident: &str) {
@@ -564,7 +568,13 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 let name = vm.objects_mut().allocate_string(name.to_str().into());
                 let arity = u8::try_from(decl.params().count())
                     .expect("function cannot have more than 255 arguments");
-                let mut compiler = Compiler::new_function(self, name, arity, self.line_map);
+                let mut compiler = Compiler::new_function(
+                    self,
+                    name,
+                    arity,
+                    self.line_map,
+                    decl.return_position(),
+                );
                 compiler.begin_block();
                 for param in decl.params() {
                     compiler.push_local(param.to_str());
@@ -572,7 +582,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 }
                 compiler.gen_block_stmt(vm, decl.body().unwrap());
                 compiler.end_block(decl.start());
-                let (mut function, upvalues) = compiler.finish();
+                let (mut function, upvalues) = compiler.finish().unwrap();
                 *function.upvalues_mut() = u8::try_from(upvalues.len()).unwrap();
                 let fun_obj = vm.objects_mut().allocate_function(function);
 

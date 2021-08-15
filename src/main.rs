@@ -79,7 +79,10 @@ fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
         };
         // SAFETY: we construct a chunk with valid constants
         unsafe {
-            let (function, upvalues) = compiler.finish();
+            let (function, upvalues) = match compiler.finish() {
+                Some(v) => v,
+                None => continue,
+            };
             assert!(upvalues.is_empty());
             function.trace();
 
