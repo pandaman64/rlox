@@ -7,8 +7,9 @@ use crate::{
     ast::{
         BinOpKind, BlockStmt, Decl, Expr, ForInit, Identifier, Primary, Stmt, UnaryOpKind, VarDecl,
     },
+    line_map::LineMap,
     object::Function,
-    opcode::{Chunk, OpCode},
+    opcode::OpCode,
     table::InternedStr,
     value::Value,
     vm::Vm,
@@ -33,13 +34,15 @@ pub enum FunctionKind {
     Script,
 }
 
-pub struct Compiler<'parent> {
-    parent: Option<&'parent Compiler<'parent>>,
+pub struct Compiler<'parent, 'map> {
+    parent: Option<&'parent Compiler<'parent, 'map>>,
     function: Function,
     kind: FunctionKind,
     locals: Vec<Local>,
     upvalues: RefCell<Vec<Upvalue>>,
     block_depth: usize,
+    line_map: &'map LineMap,
+    return_position: Option<usize>,
 }
 
 fn new_locals() -> Vec<Local> {
@@ -53,8 +56,8 @@ fn new_locals() -> Vec<Local> {
     ]
 }
 
-impl<'parent> Compiler<'parent> {
-    pub fn new_script() -> Self {
+impl<'parent, 'map> Compiler<'parent, 'map> {
+    pub fn new_script(line_map: &'map LineMap) -> Self {
         Self {
             parent: None,
             function: Function::new_script(),
@@ -62,10 +65,17 @@ impl<'parent> Compiler<'parent> {
             locals: new_locals(),
             upvalues: RefCell::new(vec![]),
             block_depth: 0,
+            line_map,
+            return_position: None,
         }
     }
 
-    fn new_function(parent: &'parent Compiler<'parent>, name: InternedStr, arity: u8) -> Self {
+    fn new_function(
+        parent: &'parent Compiler<'parent, 'map>,
+        name: InternedStr,
+        arity: u8,
+        line_map: &'map LineMap,
+    ) -> Self {
         Self {
             parent: Some(parent),
             function: Function::new_function(name, arity, 0),
@@ -73,11 +83,13 @@ impl<'parent> Compiler<'parent> {
             locals: new_locals(),
             upvalues: RefCell::new(vec![]),
             block_depth: 0,
+            line_map,
+            return_position: None,
         }
     }
 
     pub fn finish(mut self) -> (Function, Vec<Upvalue>) {
-        self.gen_return();
+        self.gen_return(self.return_position.unwrap());
         (self.function, self.upvalues.into_inner())
     }
 
@@ -108,15 +120,15 @@ impl<'parent> Compiler<'parent> {
         self.block_depth += 1;
     }
 
-    fn end_block(&mut self) {
+    fn end_block(&mut self, position: usize) {
         while let Some(local) = self.locals.last() {
             if local.depth != self.block_depth {
                 break;
             }
             if !local.captured.get() {
-                self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                self.push_opcode(OpCode::Pop, position);
             } else {
-                self.chunk_mut().push_code(OpCode::CloseUpvalue as _, 0);
+                self.push_opcode(OpCode::CloseUpvalue, position);
             }
             self.locals.pop();
         }
@@ -188,21 +200,48 @@ impl<'parent> Compiler<'parent> {
             )
         } else {
             let ident = vm.objects_mut().allocate_string(ident.to_str().into());
-            let index = self
-                .chunk_mut()
-                .push_constant(Value::Object(ident.into_raw_obj()));
+            let index = self.push_constant(Value::Object(ident.into_raw_obj()));
 
             (OpCode::GetGlobal, OpCode::SetGlobal, index)
         }
     }
 
-    fn chunk_mut(&mut self) -> &mut Chunk {
-        self.function.chunk_mut()
+    fn push_opcode(&mut self, code: OpCode, position: usize) {
+        let line = self.line_map.resolve(position);
+        self.function.chunk_mut().push_code(code as u8, line);
     }
 
-    fn gen_return(&mut self) {
-        self.chunk_mut().push_code(OpCode::Nil as _, 0);
-        self.chunk_mut().push_code(OpCode::Return as _, 0);
+    fn push_u8(&mut self, constant: u8, position: usize) {
+        let line = self.line_map.resolve(position);
+        self.function.chunk_mut().push_code(constant, line);
+    }
+
+    fn push_constant(&mut self, value: Value) -> u8 {
+        self.function.chunk_mut().push_constant(value)
+    }
+
+    fn allocate_jump_location(&mut self, position: usize) -> usize {
+        let line = self.line_map.resolve(position);
+        self.function.chunk_mut().allocate_jump_location(line)
+    }
+
+    fn fill_jump_location(&mut self, jump: usize, ip: usize) {
+        self.function.chunk_mut().fill_jump_location(jump, ip);
+    }
+
+    fn fill_jump_location_with_current(&mut self, jump: usize) {
+        self.function
+            .chunk_mut()
+            .fill_jump_location_with_current(jump);
+    }
+
+    fn current_ip(&self) -> usize {
+        self.function.chunk().code().len()
+    }
+
+    fn gen_return(&mut self, position: usize) {
+        self.push_opcode(OpCode::Nil, position);
+        self.push_opcode(OpCode::Return, position);
     }
 
     fn gen_place(&mut self, vm: &mut Vm<'_>, expr: Expr) -> (bool, Identifier) {
@@ -233,7 +272,7 @@ impl<'parent> Compiler<'parent> {
                     UnaryOpKind::Negation => OpCode::Negate,
                     UnaryOpKind::Not => OpCode::Not,
                 };
-                self.chunk_mut().push_code(opcode as _, 0);
+                self.push_opcode(opcode, expr.start());
             }
             Expr::BinOp(expr) => {
                 let opcodes: &[OpCode] = match expr.kind() {
@@ -247,8 +286,8 @@ impl<'parent> Compiler<'parent> {
                         } else {
                             let (_get_op, set_op, index) = self.resolve(vm, ident);
                             self.gen_expr(vm, rhs);
-                            self.chunk_mut().push_code(set_op as _, 0);
-                            self.chunk_mut().push_code(index, 0);
+                            self.push_opcode(set_op, expr.start());
+                            self.push_u8(index, expr.start());
                         }
                         return;
                     }
@@ -259,17 +298,17 @@ impl<'parent> Compiler<'parent> {
 
                         self.gen_expr(vm, lhs);
 
-                        self.chunk_mut().push_code(OpCode::JumpIfFalse as _, 0);
-                        let rhs_jump = self.chunk_mut().allocate_jump_location(0);
+                        self.push_opcode(OpCode::JumpIfFalse, rhs.start());
+                        let rhs_jump = self.allocate_jump_location(rhs.start());
 
-                        self.chunk_mut().push_code(OpCode::Jump as _, 0);
-                        let end_jump = self.chunk_mut().allocate_jump_location(0);
+                        self.push_opcode(OpCode::Jump, rhs.start());
+                        let end_jump = self.allocate_jump_location(rhs.start());
 
-                        self.chunk_mut().fill_jump_location_with_current(rhs_jump);
-                        self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                        self.fill_jump_location_with_current(rhs_jump);
+                        self.push_opcode(OpCode::Pop, rhs.start());
                         self.gen_expr(vm, rhs);
 
-                        self.chunk_mut().fill_jump_location_with_current(end_jump);
+                        self.fill_jump_location_with_current(end_jump);
                         return;
                     }
                     BinOpKind::And => {
@@ -279,13 +318,13 @@ impl<'parent> Compiler<'parent> {
 
                         self.gen_expr(vm, lhs);
 
-                        self.chunk_mut().push_code(OpCode::JumpIfFalse as _, 0);
-                        let end_jump = self.chunk_mut().allocate_jump_location(0);
+                        self.push_opcode(OpCode::JumpIfFalse, rhs.start());
+                        let end_jump = self.allocate_jump_location(rhs.start());
 
-                        self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                        self.push_opcode(OpCode::Pop, rhs.start());
                         self.gen_expr(vm, rhs);
 
-                        self.chunk_mut().fill_jump_location_with_current(end_jump);
+                        self.fill_jump_location_with_current(end_jump);
                         return;
                     }
                     BinOpKind::Equal => &[OpCode::Equal],
@@ -304,39 +343,36 @@ impl<'parent> Compiler<'parent> {
                     self.gen_expr(vm, operand);
                 }
                 for opcode in opcodes.iter() {
-                    self.chunk_mut().push_code(*opcode as _, 0);
+                    self.push_opcode(*opcode, expr.start());
                 }
             }
             Expr::Primary(expr) => match expr {
                 Primary::Identifier(ident) => {
+                    let position = ident.start();
                     let (get_op, _set_op, index) = self.resolve(vm, ident);
-                    self.chunk_mut().push_code(get_op as _, 0);
-                    self.chunk_mut().push_code(index, 0);
+                    self.push_opcode(get_op, position);
+                    self.push_u8(index, position);
                 }
-                Primary::NilLiteral(_) => {
-                    self.chunk_mut().push_code(OpCode::Nil as _, 0);
+                Primary::NilLiteral(n) => {
+                    self.push_opcode(OpCode::Nil, n.start());
                 }
                 Primary::BooleanLiteral(b) => {
                     if b.to_boolean() {
-                        self.chunk_mut().push_code(OpCode::True as _, 0);
+                        self.push_opcode(OpCode::True, b.start());
                     } else {
-                        self.chunk_mut().push_code(OpCode::False as _, 0);
+                        self.push_opcode(OpCode::False, b.start());
                     }
                 }
                 Primary::StringLiteral(s) => {
                     let obj = vm.objects_mut().allocate_string(s.to_str().into());
-                    let index = self
-                        .chunk_mut()
-                        .push_constant(Value::Object(obj.into_raw_obj()));
-                    self.chunk_mut().push_code(OpCode::Constant as _, 0);
-                    self.chunk_mut().push_code(index, 0);
+                    let index = self.push_constant(Value::Object(obj.into_raw_obj()));
+                    self.push_opcode(OpCode::Constant, s.start());
+                    self.push_u8(index, s.start());
                 }
                 Primary::NumberLiteral(num) => {
-                    let index = self
-                        .chunk_mut()
-                        .push_constant(Value::Number(num.to_number()));
-                    self.chunk_mut().push_code(OpCode::Constant as _, 0);
-                    self.chunk_mut().push_code(index, 0);
+                    let index = self.push_constant(Value::Number(num.to_number()));
+                    self.push_opcode(OpCode::Constant, num.start());
+                    self.push_u8(index, num.start());
                 }
             },
             Expr::Call(expr) => {
@@ -346,10 +382,10 @@ impl<'parent> Compiler<'parent> {
                     self.gen_expr(vm, arg);
                     args += 1;
                 }
-                self.chunk_mut().push_code(OpCode::Call as _, 0);
-                self.chunk_mut().push_code(
+                self.push_opcode(OpCode::Call, expr.start());
+                self.push_u8(
                     u8::try_from(args).expect("function call cannot have more than 255 arguments"),
-                    0,
+                    expr.start(),
                 );
             }
         }
@@ -360,127 +396,133 @@ impl<'parent> Compiler<'parent> {
         for decl in stmt.decls() {
             self.gen_decl(vm, decl);
         }
-        self.end_block();
+        self.end_block(stmt.start());
     }
 
     fn gen_stmt(&mut self, vm: &mut Vm<'_>, stmt: Stmt) {
         match stmt {
             Stmt::ExprStmt(stmt) => {
-                self.gen_expr(vm, stmt.expr().unwrap());
-                self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                let expr = stmt.expr().unwrap();
+                let position = expr.start();
+                self.gen_expr(vm, expr);
+                self.push_opcode(OpCode::Pop, position);
             }
             Stmt::PrintStmt(stmt) => {
                 self.gen_expr(vm, stmt.expr().unwrap());
-                self.chunk_mut().push_code(OpCode::Print as _, 0);
+                self.push_opcode(OpCode::Print, stmt.start());
             }
             Stmt::ReturnStmt(stmt) => match self.kind {
                 FunctionKind::Script => todo!("cannot return from top-level script"),
                 FunctionKind::Function => {
                     match stmt.expr() {
                         Some(expr) => self.gen_expr(vm, expr),
-                        None => self.chunk_mut().push_code(OpCode::Nil as _, 0),
+                        None => self.push_opcode(OpCode::Nil, stmt.start()),
                     }
-                    self.chunk_mut().push_code(OpCode::Return as _, 0);
+                    self.push_opcode(OpCode::Return, stmt.start());
                 }
             },
             Stmt::BlockStmt(stmt) => self.gen_block_stmt(vm, stmt),
             Stmt::IfStmt(stmt) => {
                 let cond = stmt.cond().unwrap();
+                let cond_position = cond.start();
                 let mut branches = stmt.branches();
                 let then_branch = branches.next().unwrap();
                 let else_branch = branches.next();
 
                 self.gen_expr(vm, cond);
 
-                self.chunk_mut().push_code(OpCode::JumpIfFalse as _, 0);
-                let else_jump = self.chunk_mut().allocate_jump_location(0);
+                self.push_opcode(OpCode::JumpIfFalse, cond_position);
+                let else_jump = self.allocate_jump_location(cond_position);
 
-                self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                self.push_opcode(OpCode::Pop, cond_position);
                 self.gen_stmt(vm, then_branch);
 
                 if let Some(else_branch) = else_branch {
-                    self.chunk_mut().push_code(OpCode::Jump as _, 0);
-                    let end_jump = self.chunk_mut().allocate_jump_location(0);
+                    self.push_opcode(OpCode::Jump, else_branch.start());
+                    let end_jump = self.allocate_jump_location(else_branch.start());
 
-                    self.chunk_mut().fill_jump_location_with_current(else_jump);
-                    self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                    self.fill_jump_location_with_current(else_jump);
+                    self.push_opcode(OpCode::Pop, else_branch.start());
                     self.gen_stmt(vm, else_branch);
 
-                    self.chunk_mut().fill_jump_location_with_current(end_jump);
+                    self.fill_jump_location_with_current(end_jump);
                 } else {
-                    self.chunk_mut().fill_jump_location_with_current(else_jump);
-                    self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                    self.fill_jump_location_with_current(else_jump);
+                    self.push_opcode(OpCode::Pop, stmt.start());
                 }
             }
             Stmt::WhileStmt(stmt) => {
                 let cond = stmt.cond().unwrap();
                 let body = stmt.body().unwrap();
 
-                let start_loop_ip = self.chunk_mut().code().len();
+                let start_loop_ip = self.current_ip();
 
                 self.gen_expr(vm, cond);
 
-                self.chunk_mut().push_code(OpCode::JumpIfFalse as _, 0);
-                let end_jump = self.chunk_mut().allocate_jump_location(0);
+                self.push_opcode(OpCode::JumpIfFalse, body.start());
+                let end_jump = self.allocate_jump_location(body.start());
 
-                self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                self.push_opcode(OpCode::Pop, body.start());
                 self.gen_stmt(vm, body);
 
-                self.chunk_mut().push_code(OpCode::Jump as _, 0);
-                let start_jump = self.chunk_mut().allocate_jump_location(0);
-                self.chunk_mut()
-                    .fill_jump_location(start_jump, start_loop_ip);
+                self.push_opcode(OpCode::Jump, stmt.start());
+                let start_jump = self.allocate_jump_location(stmt.start());
+                self.fill_jump_location(start_jump, start_loop_ip);
 
-                self.chunk_mut().fill_jump_location_with_current(end_jump);
-                self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                self.fill_jump_location_with_current(end_jump);
+                self.push_opcode(OpCode::Pop, stmt.start());
             }
             Stmt::ForStmt(stmt) => {
                 self.begin_block();
 
                 match stmt.init() {
                     Some(ForInit::Expr(expr)) => {
+                        let position = expr.start();
                         self.gen_expr(vm, expr);
-                        self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                        self.push_opcode(OpCode::Pop, position);
                     }
                     Some(ForInit::VarDecl(decl)) => self.gen_var_decl(vm, decl),
                     _ => {}
                 }
 
-                let start_loop_ip = self.chunk_mut().code().len();
+                let start_loop_ip = self.current_ip();
 
                 let end_jump = stmt.cond().map(|cond| {
-                    self.gen_expr(vm, cond.expr().unwrap());
-                    self.chunk_mut().push_code(OpCode::JumpIfFalse as _, 0);
-                    let end_jump = self.chunk_mut().allocate_jump_location(0);
-                    self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                    let expr = cond.expr().unwrap();
+                    let position = expr.start();
+                    self.gen_expr(vm, expr);
+                    self.push_opcode(OpCode::JumpIfFalse, position);
+                    let end_jump = self.allocate_jump_location(position);
+                    self.push_opcode(OpCode::Pop, position);
                     end_jump
                 });
 
                 self.gen_stmt(vm, stmt.body().unwrap());
 
                 if let Some(incr) = stmt.incr() {
-                    self.gen_expr(vm, incr.expr().unwrap());
-                    self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                    let expr = incr.expr().unwrap();
+                    let position = expr.start();
+                    self.gen_expr(vm, expr);
+                    self.push_opcode(OpCode::Pop, position);
                 }
 
-                self.chunk_mut().push_code(OpCode::Jump as _, 0);
-                let start_jump = self.chunk_mut().allocate_jump_location(0);
-                self.chunk_mut()
-                    .fill_jump_location(start_jump, start_loop_ip);
+                self.push_opcode(OpCode::Jump, stmt.start());
+                let start_jump = self.allocate_jump_location(stmt.start());
+                self.fill_jump_location(start_jump, start_loop_ip);
 
                 if let Some(end_jump) = end_jump {
-                    self.chunk_mut().fill_jump_location_with_current(end_jump);
+                    self.fill_jump_location_with_current(end_jump);
                 }
-                self.chunk_mut().push_code(OpCode::Pop as _, 0);
+                self.push_opcode(OpCode::Pop, stmt.start());
 
-                self.end_block();
+                self.end_block(stmt.start());
             }
         }
     }
 
     fn define_variable<F>(&mut self, vm: &mut Vm<'_>, ident: Identifier, gen_value: F)
     where
-        F: FnOnce(&mut Self, &mut Vm<'_>),
+        F: FnOnce(&mut Self, &mut Vm<'_>) -> usize,
     {
         if self.block_depth > GLOBAL_BLOCK {
             let idx = self.locals.len();
@@ -490,12 +532,10 @@ impl<'parent> Compiler<'parent> {
             self.locals[idx].depth = self.block_depth;
         } else {
             let ident = vm.objects_mut().allocate_string(ident.to_str().into());
-            let index = self
-                .chunk_mut()
-                .push_constant(Value::Object(ident.into_raw_obj()));
-            gen_value(self, vm);
-            self.chunk_mut().push_code(OpCode::DefineGlobal as _, 0);
-            self.chunk_mut().push_code(index, 0);
+            let index = self.push_constant(Value::Object(ident.into_raw_obj()));
+            let position = gen_value(self, vm);
+            self.push_opcode(OpCode::DefineGlobal, position);
+            self.push_u8(index, position);
         }
     }
 
@@ -503,12 +543,20 @@ impl<'parent> Compiler<'parent> {
         let ident = decl.ident().unwrap();
         let expr = decl.expr();
         self.define_variable(vm, ident, move |this, vm| match expr {
-            Some(expr) => this.gen_expr(vm, expr),
-            None => this.chunk_mut().push_code(OpCode::Nil as _, 0),
+            Some(expr) => {
+                this.gen_expr(vm, expr);
+                decl.start()
+            }
+            None => {
+                this.push_opcode(OpCode::Nil, decl.start());
+                decl.start()
+            }
         });
     }
 
     pub fn gen_decl(&mut self, vm: &mut Vm<'_>, decl: Decl) {
+        self.return_position = Some(decl.return_position());
+
         match decl {
             Decl::VarDecl(decl) => self.gen_var_decl(vm, decl),
             Decl::FunDecl(decl) => {
@@ -516,28 +564,30 @@ impl<'parent> Compiler<'parent> {
                 let name = vm.objects_mut().allocate_string(name.to_str().into());
                 let arity = u8::try_from(decl.params().count())
                     .expect("function cannot have more than 255 arguments");
-                let mut compiler = Compiler::new_function(self, name, arity);
+                let mut compiler = Compiler::new_function(self, name, arity, self.line_map);
                 compiler.begin_block();
                 for param in decl.params() {
                     compiler.push_local(param.to_str());
                     compiler.locals.last_mut().unwrap().depth = compiler.block_depth;
                 }
                 compiler.gen_block_stmt(vm, decl.body().unwrap());
-                compiler.end_block();
+                compiler.end_block(decl.start());
                 let (mut function, upvalues) = compiler.finish();
                 *function.upvalues_mut() = u8::try_from(upvalues.len()).unwrap();
                 let fun_obj = vm.objects_mut().allocate_function(function);
 
                 self.define_variable(vm, decl.ident().unwrap(), move |this, _vm| {
-                    let index = this.chunk_mut().push_constant(Value::Object(fun_obj));
-                    this.chunk_mut().push_code(OpCode::Closure as _, 0);
-                    this.chunk_mut().push_code(index, 0);
+                    let index = this.push_constant(Value::Object(fun_obj));
+                    this.push_opcode(OpCode::Closure, decl.start());
+                    this.push_u8(index, decl.start());
 
                     for upvalue in upvalues.iter() {
                         let is_local = if upvalue.is_local { 1 } else { 0 };
-                        this.chunk_mut().push_code(is_local, 0);
-                        this.chunk_mut().push_code(upvalue.index, 0);
+                        this.push_u8(is_local, decl.start());
+                        this.push_u8(upvalue.index, decl.start());
                     }
+
+                    decl.start()
                 });
             }
             Decl::Stmt(stmt) => self.gen_stmt(vm, stmt),

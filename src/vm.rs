@@ -440,10 +440,7 @@ impl<'w> Vm<'w> {
                 let function = closure.function().as_ref();
 
                 // ip is incremented already
-                eprint!(
-                    "[line {}] in ",
-                    function.chunk().line()[frame.ip - 1]
-                );
+                eprint!("[line {}] in ", function.chunk().line()[frame.ip - 1]);
                 match function.name() {
                     Some(name) => eprintln!("{}()", name.display()),
                     None => eprintln!("script"),

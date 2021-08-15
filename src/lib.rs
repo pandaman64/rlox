@@ -3,6 +3,7 @@
 
 pub mod ast;
 pub mod codegen;
+pub mod line_map;
 pub mod object;
 pub mod opcode;
 pub mod syntax;
@@ -20,7 +21,9 @@ use std::{
 
 use ast::Root;
 use codegen::Compiler;
+use line_map::LineMap;
 use object::NativeFunction;
+use regex::Regex;
 use vm::Vm;
 
 use crate::vm::InterpretResult;
@@ -62,7 +65,16 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::Other, "syntax error"));
     }
 
-    let mut compiler = Compiler::new_script();
+    let line_map = {
+        let mut line_map = LineMap::new();
+        line_map.push(1, 0);
+        let re = Regex::new(r"\r\n|\n").unwrap();
+        for (i, newline) in re.find_iter(input).enumerate() {
+            line_map.push(i + 2, newline.end());
+        }
+        line_map
+    };
+    let mut compiler = Compiler::new_script(&line_map);
     let root = Root::cast(node).unwrap();
     for decl in root.decls() {
         compiler.gen_decl(&mut vm, decl);

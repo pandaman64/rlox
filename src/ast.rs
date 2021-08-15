@@ -34,6 +34,10 @@ impl UnaryOp {
         }
     }
 
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
     fn first_token(&self) -> Option<SyntaxToken> {
         first_nontirivial_token(&self.inner)
     }
@@ -83,6 +87,10 @@ impl BinOp {
         }
     }
 
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
     fn first_token(&self) -> Option<SyntaxToken> {
         first_nontirivial_token(&self.inner)
     }
@@ -129,6 +137,10 @@ impl Identifier {
         }
     }
 
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
     pub fn to_str(&self) -> &str {
         self.inner.text()
     }
@@ -146,6 +158,10 @@ impl StringLiteral {
         } else {
             None
         }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
     }
 
     pub fn to_str(&self) -> &str {
@@ -169,6 +185,10 @@ impl NumberLiteral {
         }
     }
 
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
     pub fn to_number(&self) -> f64 {
         self.inner.text().parse().unwrap()
     }
@@ -187,6 +207,10 @@ impl NilLiteral {
             None
         }
     }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
 }
 
 #[derive(Debug)]
@@ -201,6 +225,10 @@ impl BooleanLiteral {
         } else {
             None
         }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
     }
 
     pub fn to_boolean(&self) -> bool {
@@ -239,6 +267,18 @@ impl Primary {
             None
         }
     }
+
+    pub fn start(&self) -> usize {
+        use Primary::*;
+
+        match self {
+            Identifier(ident) => ident.start(),
+            NilLiteral(nil) => nil.start(),
+            BooleanLiteral(boolean) => boolean.start(),
+            StringLiteral(string) => string.start(),
+            NumberLiteral(number) => number.start(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -253,6 +293,10 @@ impl CallExpr {
         } else {
             None
         }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
     }
 
     pub fn function(&self) -> Option<Expr> {
@@ -295,6 +339,17 @@ impl Expr {
             _ => return None,
         })
     }
+
+    pub fn start(&self) -> usize {
+        use Expr::*;
+
+        match self {
+            UnaryOp(op) => op.start(),
+            BinOp(op) => op.start(),
+            Primary(p) => p.start(),
+            Call(c) => c.start(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -309,6 +364,14 @@ impl VarDecl {
         } else {
             None
         }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
+    pub fn return_position(&self) -> usize {
+        self.inner.text_range().end().into()
     }
 
     pub fn ident(&self) -> Option<Identifier> {
@@ -332,6 +395,24 @@ impl FunDecl {
         } else {
             None
         }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
+    pub fn return_position(&self) -> usize {
+        // the position of `}` if exists.
+        // return the end of the node if not exist.
+        self.inner
+            .children_with_tokens()
+            .find_map(|child| match child {
+                NodeOrToken::Token(token) if token.kind() == SyntaxKind::BraceCloseToken => {
+                    Some(token.text_range().start().into())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| self.inner.text_range().end().into())
     }
 
     pub fn ident(&self) -> Option<Identifier> {
@@ -371,6 +452,10 @@ impl ExprStmt {
         }
     }
 
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
     pub fn expr(&self) -> Option<Expr> {
         self.inner.children().find_map(Expr::cast)
     }
@@ -388,6 +473,10 @@ impl PrintStmt {
         } else {
             None
         }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
     }
 
     pub fn expr(&self) -> Option<Expr> {
@@ -409,6 +498,10 @@ impl ReturnStmt {
         }
     }
 
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
     pub fn expr(&self) -> Option<Expr> {
         self.inner.children().find_map(Expr::cast)
     }
@@ -428,6 +521,10 @@ impl BlockStmt {
         }
     }
 
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
     pub fn decls(&self) -> impl Iterator<Item = Decl> {
         self.inner.children().filter_map(Decl::cast)
     }
@@ -445,6 +542,10 @@ impl IfStmt {
         } else {
             None
         }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
     }
 
     pub fn cond(&self) -> Option<Expr> {
@@ -468,6 +569,10 @@ impl WhileStmt {
         } else {
             None
         }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
     }
 
     pub fn cond(&self) -> Option<Expr> {
@@ -557,6 +662,10 @@ impl ForStmt {
         }
     }
 
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
     pub fn init(&self) -> Option<ForInit> {
         self.inner.children().find_map(ForInit::cast)
     }
@@ -605,6 +714,34 @@ impl Stmt {
             None
         }
     }
+
+    pub fn start(&self) -> usize {
+        use Stmt::*;
+
+        match self {
+            ExprStmt(stmt) => stmt.start(),
+            PrintStmt(stmt) => stmt.start(),
+            ReturnStmt(stmt) => stmt.start(),
+            BlockStmt(stmt) => stmt.start(),
+            IfStmt(stmt) => stmt.start(),
+            WhileStmt(stmt) => stmt.start(),
+            ForStmt(stmt) => stmt.start(),
+        }
+    }
+
+    pub fn return_position(&self) -> usize {
+        use Stmt::*;
+
+        match self {
+            ExprStmt(stmt) => stmt.inner.text_range().end().into(),
+            PrintStmt(stmt) => stmt.inner.text_range().end().into(),
+            ReturnStmt(stmt) => stmt.inner.text_range().end().into(),
+            BlockStmt(stmt) => stmt.inner.text_range().end().into(),
+            IfStmt(stmt) => stmt.inner.text_range().end().into(),
+            WhileStmt(stmt) => stmt.inner.text_range().end().into(),
+            ForStmt(stmt) => stmt.inner.text_range().end().into(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -628,6 +765,16 @@ impl Decl {
             })
         } else {
             None
+        }
+    }
+
+    pub fn return_position(&self) -> usize {
+        use Decl::*;
+
+        match self {
+            VarDecl(decl) => decl.return_position(),
+            FunDecl(decl) => decl.return_position(),
+            Stmt(decl) => decl.return_position(),
         }
     }
 }

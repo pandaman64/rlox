@@ -2,11 +2,17 @@
 // #![warn(unreachable_pub)]
 
 use clap::Clap;
-use std::{fs, io::{self, BufRead}, path::PathBuf, process};
+use std::{
+    fs,
+    io::{self, BufRead},
+    path::PathBuf,
+    process,
+};
 
 use rlox::{
     ast::Root,
     codegen::Compiler,
+    line_map::LineMap,
     object::NativeFunction,
     run, trace_available,
     vm::{InterpretResult, Vm},
@@ -16,6 +22,7 @@ fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
     // std::env::set_var("RUST_LOG", "trace");
 
     let mut line = String::new();
+    let mut line_num = 1;
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
 
@@ -52,7 +59,13 @@ fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
             return Err(io::Error::new(io::ErrorKind::Other, "syntax error"));
         }
 
-        let mut compiler = Compiler::new_script();
+        let line_map = {
+            let mut line_map = LineMap::new();
+            line_map.push(line_num, 0);
+            line_num += 1;
+            line_map
+        };
+        let mut compiler = Compiler::new_script(&line_map);
         match Root::cast(node) {
             None => {
                 eprintln!("syntax error");
