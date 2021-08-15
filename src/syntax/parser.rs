@@ -135,10 +135,13 @@ where
             Some(token) if token == expected => self.bump(),
             Some(got) => {
                 if expected == SyntaxKind::IdentifierToken && got.is_keyword() {
+                    // if expected token is an identifier and get a keyword, emit a special error
+                    // and continue parsing as if it succeeds.
                     self.errors.push(SyntaxError::ExpectIdentifier {
                         got,
                         position: self.position,
-                    })
+                    });
+                    self.bump();
                 } else {
                     self.errors.push(SyntaxError::UnexpectedToken {
                         expected,
