@@ -3,17 +3,19 @@ mod parser;
 
 use logos::Logos;
 
-use self::parser::SyntaxError;
+pub use self::parser::SyntaxError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Logos, num_derive::FromPrimitive)]
 #[repr(u16)]
 pub enum SyntaxKind {
+    // errors
     #[error]
     Error,
 
-    #[regex(r"[ \t\n\f]+")]
+    // trivias
+    #[regex(r"[ \t\r\n\f]+")]
     WhitespaceToken,
-    #[regex(r"//[^\n]*\n")]
+    #[regex(r"//[^\r\n]*\r?\n?")]
     CommentToken,
 
     // sigils
@@ -59,7 +61,7 @@ pub enum SyntaxKind {
     #[regex("[a-zA-Z][a-zA-Z0-9]*")]
     IdentifierToken,
     // not supporting escape sequence
-    #[regex(r#""[^"]*""#)]
+    #[regex(r#""[^"]*"?"#)]
     StringLiteralToken,
     #[regex(r"[0-9]+(\.[0-9]+)?")]
     NumberToken,

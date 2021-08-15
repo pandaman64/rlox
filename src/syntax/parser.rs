@@ -15,6 +15,12 @@ pub enum SyntaxError {
     UnexpectedEof {
         expected: SyntaxKind,
     },
+    UnrecognizedToken {
+        position: usize,
+    },
+    UnterminatedStringLiteral {
+        position: usize,
+    },
 }
 
 pub struct Parser<'i, I: Iterator<Item = (SyntaxKind, &'i str, Range<usize>)>> {
@@ -86,8 +92,21 @@ where
 {
     fn bump(&mut self) {
         if let Some((token, slice, range)) = self.input.next() {
+            // report errors
+            match token {
+                SyntaxKind::Error => self.errors.push(SyntaxError::UnrecognizedToken {
+                    position: range.start,
+                }),
+                SyntaxKind::StringLiteralToken if !slice.ends_with('"') => {
+                    self.errors.push(SyntaxError::UnterminatedStringLiteral {
+                        position: range.start,
+                    })
+                }
+                _ => {}
+            }
+
             self.position = range.end;
-            self.builder.token(token.into(), slice)
+            self.builder.token(token.into(), slice);
         }
     }
 

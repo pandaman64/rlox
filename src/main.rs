@@ -2,23 +2,20 @@
 // #![warn(unreachable_pub)]
 
 use clap::Clap;
-use std::{
-    fs,
-    io::{self, BufRead},
-    path::PathBuf,
-    process,
-};
+use std::{fs, io::BufRead, path::PathBuf, process};
 
 use rlox::{
     ast::Root,
     codegen::Compiler,
     line_map::LineMap,
     object::NativeFunction,
-    run, trace_available,
+    run,
+    syntax::SyntaxError,
+    trace_available,
     vm::{InterpretResult, Vm},
 };
 
-fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
+fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
     // std::env::set_var("RUST_LOG", "trace");
 
     let mut line = String::new();
@@ -42,21 +39,10 @@ fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
 
     loop {
         line.clear();
-        vm.print("> ")?;
-        vm.flush()?;
-        if input.read_line(&mut line)? == 0 {
+        vm.print("> ").map_err(rlox::Error::Output)?;
+        vm.flush().map_err(rlox::Error::Output)?;
+        if input.read_line(&mut line).map_err(rlox::Error::Input)? == 0 {
             break;
-        }
-
-        let (node, errors) = rlox::syntax::parse(&line);
-        if trace_available() {
-            eprintln!("{:#?}", node);
-        }
-        if !errors.is_empty() {
-            for error in errors {
-                eprintln!("{:?}", error);
-            }
-            return Err(io::Error::new(io::ErrorKind::Other, "syntax error"));
         }
 
         let line_map = {
@@ -65,6 +51,27 @@ fn repl<R: BufRead>(mut input: R) -> std::io::Result<()> {
             line_num += 1;
             line_map
         };
+        let (node, errors) = rlox::syntax::parse(&line);
+        if trace_available() {
+            eprintln!("{:#?}", node);
+        }
+        if !errors.is_empty() {
+            for error in errors {
+                #[allow(clippy::single_match)]
+                match error {
+                    SyntaxError::UnterminatedStringLiteral { position } => {
+                        let line = line_map.resolve(position);
+                        eprintln!("[line {}] Error: Unterminated string", line);
+                    }
+                    _ => {
+                        // TODO: adjust error message
+                        // eprintln!("{:?}", error);
+                    }
+                }
+            }
+            continue;
+        }
+
         let mut compiler = Compiler::new_script(&line_map);
         match Root::cast(node) {
             None => {
@@ -124,7 +131,10 @@ fn main() {
         }
     };
 
-    if result.is_err() {
-        process::exit(70)
+    match result {
+        Ok(()) => process::exit(0),
+        Err(rlox::Error::Syntax) => process::exit(65),
+        Err(rlox::Error::Runtime) => process::exit(70),
+        Err(_) => process::exit(999),
     }
 }

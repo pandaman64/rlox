@@ -24,9 +24,18 @@ use codegen::Compiler;
 use line_map::LineMap;
 use object::NativeFunction;
 use regex::Regex;
+use syntax::SyntaxError;
 use vm::Vm;
 
 use crate::vm::InterpretResult;
+
+#[derive(Debug)]
+pub enum Error {
+    Input(io::Error),
+    Output(io::Error),
+    Syntax,
+    Runtime,
+}
 
 pub fn trace_available() -> bool {
     static AVAILABLE: AtomicBool = AtomicBool::new(false);
@@ -39,7 +48,7 @@ pub fn trace_available() -> bool {
     AVAILABLE.load(atomic::Ordering::Relaxed)
 }
 
-pub fn run<W: Write>(input: &str, mut stdout: W) -> io::Result<()> {
+pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
     let mut vm = Vm::new(&mut stdout);
     vm.define_native_function(
         "clock".into(),
@@ -54,17 +63,6 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> io::Result<()> {
         }),
     );
 
-    let (node, errors) = syntax::parse(input);
-    if trace_available() {
-        eprintln!("{:#?}", node);
-    }
-    if !errors.is_empty() {
-        for error in errors {
-            eprintln!("{:?}", error);
-        }
-        return Err(io::Error::new(io::ErrorKind::Other, "syntax error"));
-    }
-
     let line_map = {
         let mut line_map = LineMap::new();
         line_map.push(1, 0);
@@ -74,6 +72,27 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> io::Result<()> {
         }
         line_map
     };
+    let (node, errors) = syntax::parse(input);
+    if trace_available() {
+        eprintln!("{:#?}", node);
+    }
+    if !errors.is_empty() {
+        for error in errors {
+            #[allow(clippy::single_match)]
+            match error {
+                SyntaxError::UnterminatedStringLiteral { position } => {
+                    let line = line_map.resolve(position);
+                    eprintln!("[line {}] Error: Unterminated string.", line);
+                }
+                _ => {
+                    // TODO: adjust error message
+                    // eprintln!("{:?}", error);
+                }
+            }
+        }
+        return Err(Error::Syntax);
+    }
+
     let mut compiler = Compiler::new_script(&line_map);
     let root = Root::cast(node).unwrap();
     for decl in root.decls() {
@@ -93,7 +112,7 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> io::Result<()> {
         vm.call(0);
         if vm.run() != InterpretResult::Ok {
             vm.print_stack_trace();
-            Err(io::Error::new(io::ErrorKind::Other, "vm terminated"))
+            Err(Error::Runtime)
         } else {
             Ok(())
         }
