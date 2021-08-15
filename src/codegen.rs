@@ -466,19 +466,19 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 self.push_opcode(OpCode::Pop, cond_position);
                 self.gen_stmt(vm, then_branch);
 
-                if let Some(else_branch) = else_branch {
-                    self.push_opcode(OpCode::Jump, else_branch.start());
-                    let end_jump = self.allocate_jump_location(else_branch.start());
+                self.push_opcode(OpCode::Jump, cond_position);
+                let end_jump = self.allocate_jump_location(cond_position);
 
+                if let Some(else_branch) = else_branch {
                     self.fill_jump_location_with_current(else_jump);
                     self.push_opcode(OpCode::Pop, else_branch.start());
                     self.gen_stmt(vm, else_branch);
-
-                    self.fill_jump_location_with_current(end_jump);
                 } else {
                     self.fill_jump_location_with_current(else_jump);
                     self.push_opcode(OpCode::Pop, stmt.start());
                 }
+
+                self.fill_jump_location_with_current(end_jump);
             }
             Stmt::WhileStmt(stmt) => {
                 let cond = stmt.cond().unwrap();
