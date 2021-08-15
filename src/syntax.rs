@@ -61,7 +61,7 @@ pub enum SyntaxKind {
     // not supporting escape sequence
     #[regex(r#""[^"]*""#)]
     StringLiteralToken,
-    #[regex("[0-9]+")]
+    #[regex(r"[0-9]+(\.[0-9]+)?")]
     NumberToken,
 
     // keywords
