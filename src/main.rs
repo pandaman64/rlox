@@ -61,7 +61,7 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
         }
 
         let mut compiler = Compiler::new_script(&line_map);
-        match Root::cast(node) {
+        match Root::cast(node.clone()) {
             None => {
                 eprintln!("syntax error");
                 continue;
@@ -80,7 +80,7 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
             };
             if !errors.is_empty() {
                 for error in errors {
-                    rlox::print_codegen_error(&error, &line_map);
+                    rlox::print_codegen_error(&error, &node, &line_map);
                 }
                 continue;
             }

@@ -22,6 +22,7 @@ const UNASSIGNED: usize = usize::MAX;
 pub enum CodegenError {
     ShadowingInSameScope { ident: String, position: usize },
     UnassignedLocal { ident: Identifier },
+    LoopTooLarge { position: usize },
 }
 
 struct Local {
@@ -252,14 +253,30 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         self.function.chunk_mut().allocate_jump_location(line)
     }
 
-    fn fill_jump_location(&mut self, jump: usize, ip: usize) {
-        self.function.chunk_mut().fill_jump_location(jump, ip);
+    fn fill_jump_location(&mut self, jump: usize, ip: usize, position: usize) {
+        if self
+            .function
+            .chunk_mut()
+            .fill_jump_location(jump, ip)
+            .is_err()
+        {
+            self.errors
+                .get_mut()
+                .push(CodegenError::LoopTooLarge { position })
+        };
     }
 
-    fn fill_jump_location_with_current(&mut self, jump: usize) {
-        self.function
+    fn fill_jump_location_with_current(&mut self, jump: usize, position: usize) {
+        if self
+            .function
             .chunk_mut()
-            .fill_jump_location_with_current(jump);
+            .fill_jump_location_with_current(jump)
+            .is_err()
+        {
+            self.errors
+                .get_mut()
+                .push(CodegenError::LoopTooLarge { position })
+        }
     }
 
     fn current_ip(&self) -> usize {
@@ -333,11 +350,11 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         self.push_opcode(OpCode::Jump, rhs.start());
                         let end_jump = self.allocate_jump_location(rhs.start());
 
-                        self.fill_jump_location_with_current(rhs_jump);
+                        self.fill_jump_location_with_current(rhs_jump, rhs.start());
                         self.push_opcode(OpCode::Pop, rhs.start());
                         self.gen_expr(vm, rhs);
 
-                        self.fill_jump_location_with_current(end_jump);
+                        self.fill_jump_location_with_current(end_jump, expr.end());
                         return;
                     }
                     BinOpKind::And => {
@@ -353,7 +370,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         self.push_opcode(OpCode::Pop, rhs.start());
                         self.gen_expr(vm, rhs);
 
-                        self.fill_jump_location_with_current(end_jump);
+                        self.fill_jump_location_with_current(end_jump, expr.end());
                         return;
                     }
                     BinOpKind::Equal => &[OpCode::Equal],
@@ -470,15 +487,15 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 let end_jump = self.allocate_jump_location(cond_position);
 
                 if let Some(else_branch) = else_branch {
-                    self.fill_jump_location_with_current(else_jump);
+                    self.fill_jump_location_with_current(else_jump, else_branch.start());
                     self.push_opcode(OpCode::Pop, else_branch.start());
                     self.gen_stmt(vm, else_branch);
                 } else {
-                    self.fill_jump_location_with_current(else_jump);
+                    self.fill_jump_location_with_current(else_jump, stmt.end());
                     self.push_opcode(OpCode::Pop, stmt.start());
                 }
 
-                self.fill_jump_location_with_current(end_jump);
+                self.fill_jump_location_with_current(end_jump, stmt.end());
             }
             Stmt::WhileStmt(stmt) => {
                 let cond = stmt.cond().unwrap();
@@ -494,12 +511,12 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 self.push_opcode(OpCode::Pop, body.start());
                 self.gen_stmt(vm, body);
 
-                self.push_opcode(OpCode::Jump, stmt.start());
-                let start_jump = self.allocate_jump_location(stmt.start());
-                self.fill_jump_location(start_jump, start_loop_ip);
+                self.push_opcode(OpCode::Jump, stmt.end());
+                let start_jump = self.allocate_jump_location(stmt.end());
+                self.fill_jump_location(start_jump, start_loop_ip, stmt.end());
 
-                self.fill_jump_location_with_current(end_jump);
-                self.push_opcode(OpCode::Pop, stmt.start());
+                self.fill_jump_location_with_current(end_jump, stmt.end());
+                self.push_opcode(OpCode::Pop, stmt.end());
             }
             Stmt::ForStmt(stmt) => {
                 self.begin_block();
@@ -533,16 +550,16 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     self.push_opcode(OpCode::Pop, position);
                 }
 
-                self.push_opcode(OpCode::Jump, stmt.start());
-                let start_jump = self.allocate_jump_location(stmt.start());
-                self.fill_jump_location(start_jump, start_loop_ip);
+                self.push_opcode(OpCode::Jump, stmt.end());
+                let start_jump = self.allocate_jump_location(stmt.end());
+                self.fill_jump_location(start_jump, start_loop_ip, stmt.end());
 
                 if let Some(end_jump) = end_jump {
-                    self.fill_jump_location_with_current(end_jump);
+                    self.fill_jump_location_with_current(end_jump, stmt.end());
                 }
-                self.push_opcode(OpCode::Pop, stmt.start());
+                self.push_opcode(OpCode::Pop, stmt.end());
 
-                self.end_block(stmt.start());
+                self.end_block(stmt.end());
             }
         }
     }

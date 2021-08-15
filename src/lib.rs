@@ -88,7 +88,7 @@ pub fn print_syntax_error(error: &SyntaxError, root: &SyntaxNode, line_map: &Lin
     }
 }
 
-pub fn print_codegen_error(error: &CodegenError, line_map: &LineMap) {
+pub fn print_codegen_error(error: &CodegenError, root: &SyntaxNode, line_map: &LineMap) {
     use CodegenError::*;
 
     match error {
@@ -106,6 +106,17 @@ pub fn print_codegen_error(error: &CodegenError, line_map: &LineMap) {
                 line,
                 ident.to_str()
             );
+        }
+        LoopTooLarge { position } => {
+            let position = *position;
+            let line = line_map.resolve(position);
+            let token = root.token_at_offset(position.try_into().unwrap());
+            eprint!("[line {}] Error at ", line);
+            match token.right_biased() {
+                Some(token) => eprint!("'{}'", token.text()),
+                None => eprint!("end"),
+            }
+            eprintln!(": Loop body too large.");
         }
     }
 }
@@ -146,7 +157,7 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
     }
 
     let mut compiler = Compiler::new_script(&line_map);
-    let root = Root::cast(node).unwrap();
+    let root = Root::cast(node.clone()).unwrap();
     for decl in root.decls() {
         compiler.gen_decl(&mut vm, decl);
     }
@@ -159,7 +170,7 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
         };
         if !errors.is_empty() {
             for error in errors {
-                print_codegen_error(&error, &line_map);
+                print_codegen_error(&error, &node, &line_map);
             }
             return Err(Error::Codegen);
         }

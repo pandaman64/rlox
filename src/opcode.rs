@@ -1,7 +1,7 @@
 use num::FromPrimitive as _;
 use num_derive::{FromPrimitive, ToPrimitive};
 
-use std::{convert::TryFrom, fmt};
+use std::{convert::TryFrom, fmt, num::TryFromIntError};
 
 use crate::{
     object::{self, ObjectRef},
@@ -228,23 +228,25 @@ impl Chunk {
         ret
     }
 
-    pub fn fill_jump_location(&mut self, jump: usize, ip: usize) {
+    pub fn fill_jump_location(&mut self, jump: usize, ip: usize) -> Result<(), TryFromIntError> {
         let diff = if ip >= jump {
-            i16::try_from(ip - jump).expect("too much code to jump over")
+            i16::try_from(ip - jump)?
+        } else if jump - ip == usize::try_from(i16::MAX).unwrap() + 1 {
+            i16::MIN
         } else {
-            // technically, this formula does not take into account the case where `jump + i16::MIN == ip`.
-            // but it's ok for this toy vm
-            -i16::try_from(jump - ip).expect("too much code to jump over")
+            -i16::try_from(jump - ip)?
         };
         let bytes = diff.to_le_bytes();
 
         self.code[jump] = bytes[0];
         self.code[jump + 1] = bytes[1];
+
+        Ok(())
     }
 
-    pub fn fill_jump_location_with_current(&mut self, jump: usize) {
+    pub fn fill_jump_location_with_current(&mut self, jump: usize) -> Result<(), TryFromIntError> {
         assert!(jump < self.code.len());
-        self.fill_jump_location(jump, self.code.len());
+        self.fill_jump_location(jump, self.code.len())
     }
 
     pub fn read_jump_location(&self, offset: usize) -> i16 {
