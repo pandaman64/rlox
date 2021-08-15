@@ -9,9 +9,7 @@ use rlox::{
     codegen::Compiler,
     line_map::LineMap,
     object::NativeFunction,
-    run,
-    syntax::SyntaxError,
-    trace_available,
+    run, trace_available,
     vm::{InterpretResult, Vm},
 };
 
@@ -57,17 +55,7 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
         }
         if !errors.is_empty() {
             for error in errors {
-                #[allow(clippy::single_match)]
-                match error {
-                    SyntaxError::UnterminatedStringLiteral { position } => {
-                        let line = line_map.resolve(position);
-                        eprintln!("[line {}] Error: Unterminated string", line);
-                    }
-                    _ => {
-                        // TODO: adjust error message
-                        // eprintln!("{:?}", error);
-                    }
-                }
+                rlox::print_syntax_error(&error, &line, &line_map);
             }
             continue;
         }

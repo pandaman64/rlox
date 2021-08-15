@@ -48,6 +48,30 @@ pub fn trace_available() -> bool {
     AVAILABLE.load(atomic::Ordering::Relaxed)
 }
 
+pub fn print_syntax_error(error: &SyntaxError, input: &str, line_map: &LineMap) {
+    use SyntaxError::*;
+
+    match error {
+        UnterminatedStringLiteral { position } => {
+            let line = line_map.resolve(*position);
+            eprintln!("[line {}] Error: Unterminated string.", line);
+        }
+        ExpectNode { name, position } => {
+            let line = line_map.resolve(*position);
+            eprint!("[line {}] Error at ", line);
+            match input[*position..].chars().next() {
+                Some(c) => eprint!("'{}'", c),
+                None => eprint!("end"),
+            }
+            eprintln!(": Expect {}.", name);
+        }
+        _ => {
+            // TODO: adjust error message
+            // eprintln!("{:?}", error);
+        }
+    }
+}
+
 pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
     let mut vm = Vm::new(&mut stdout);
     vm.define_native_function(
@@ -78,17 +102,7 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
     }
     if !errors.is_empty() {
         for error in errors {
-            #[allow(clippy::single_match)]
-            match error {
-                SyntaxError::UnterminatedStringLiteral { position } => {
-                    let line = line_map.resolve(position);
-                    eprintln!("[line {}] Error: Unterminated string.", line);
-                }
-                _ => {
-                    // TODO: adjust error message
-                    // eprintln!("{:?}", error);
-                }
-            }
+            print_syntax_error(&error, input, &line_map);
         }
         return Err(Error::Syntax);
     }

@@ -21,6 +21,10 @@ pub enum SyntaxError {
     UnterminatedStringLiteral {
         position: usize,
     },
+    ExpectNode {
+        name: &'static str,
+        position: usize,
+    },
 }
 
 pub struct Parser<'i, I: Iterator<Item = (SyntaxKind, &'i str, Range<usize>)>> {
@@ -164,7 +168,13 @@ where
                         self.bump();
                         self.builder.finish_node();
                     }
-                    _ => todo!("syntax error"),
+                    _ => {
+                        self.errors.push(SyntaxError::ExpectNode {
+                            name: "expression",
+                            position: self.position,
+                        });
+                        self.bump();
+                    }
                 }
                 checkpoint
             }
