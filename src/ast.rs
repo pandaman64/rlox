@@ -8,7 +8,7 @@ fn first_nontirivial_token(node: &SyntaxNode) -> Option<SyntaxToken> {
 }
 
 fn last_nontirivial_token(node: &SyntaxNode) -> Option<SyntaxToken> {
-    node.children_with_tokens()
+    node.descendants_with_tokens()
         .filter_map(|child| match child {
             NodeOrToken::Token(token) if !token.kind().is_trivial() => Some(token),
             _ => None,

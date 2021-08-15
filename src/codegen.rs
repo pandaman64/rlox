@@ -338,6 +338,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         return;
                     }
                     BinOpKind::Or => {
+                        let expr_end = expr.end();
                         let mut operands = expr.operands();
                         let lhs = operands.next().unwrap();
                         let rhs = operands.next().unwrap();
@@ -345,19 +346,20 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         self.gen_expr(vm, lhs);
 
                         self.push_opcode(OpCode::JumpIfFalse, rhs.start());
-                        let rhs_jump = self.allocate_jump_location(rhs.start());
+                        let rhs_jump = self.allocate_jump_location(expr_end);
 
                         self.push_opcode(OpCode::Jump, rhs.start());
-                        let end_jump = self.allocate_jump_location(rhs.start());
+                        let end_jump = self.allocate_jump_location(expr_end);
 
-                        self.fill_jump_location_with_current(rhs_jump, rhs.start());
+                        self.fill_jump_location_with_current(rhs_jump, expr_end);
                         self.push_opcode(OpCode::Pop, rhs.start());
                         self.gen_expr(vm, rhs);
 
-                        self.fill_jump_location_with_current(end_jump, expr.end());
+                        self.fill_jump_location_with_current(end_jump, expr_end);
                         return;
                     }
                     BinOpKind::And => {
+                        let expr_end = expr.end();
                         let mut operands = expr.operands();
                         let lhs = operands.next().unwrap();
                         let rhs = operands.next().unwrap();
@@ -365,12 +367,12 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         self.gen_expr(vm, lhs);
 
                         self.push_opcode(OpCode::JumpIfFalse, rhs.start());
-                        let end_jump = self.allocate_jump_location(rhs.start());
+                        let end_jump = self.allocate_jump_location(expr_end);
 
                         self.push_opcode(OpCode::Pop, rhs.start());
                         self.gen_expr(vm, rhs);
 
-                        self.fill_jump_location_with_current(end_jump, expr.end());
+                        self.fill_jump_location_with_current(end_jump, expr_end);
                         return;
                     }
                     BinOpKind::Equal => &[OpCode::Equal],
@@ -469,6 +471,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             },
             Stmt::BlockStmt(stmt) => self.gen_block_stmt(vm, stmt),
             Stmt::IfStmt(stmt) => {
+                let stmt_end = stmt.end();
                 let cond = stmt.cond().unwrap();
                 let cond_position = cond.start();
                 let mut branches = stmt.branches();
@@ -478,26 +481,27 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 self.gen_expr(vm, cond);
 
                 self.push_opcode(OpCode::JumpIfFalse, cond_position);
-                let else_jump = self.allocate_jump_location(cond_position);
+                let else_jump = self.allocate_jump_location(stmt_end);
 
                 self.push_opcode(OpCode::Pop, cond_position);
                 self.gen_stmt(vm, then_branch);
 
                 self.push_opcode(OpCode::Jump, cond_position);
-                let end_jump = self.allocate_jump_location(cond_position);
+                let end_jump = self.allocate_jump_location(stmt_end);
 
                 if let Some(else_branch) = else_branch {
-                    self.fill_jump_location_with_current(else_jump, else_branch.start());
+                    self.fill_jump_location_with_current(else_jump, stmt_end);
                     self.push_opcode(OpCode::Pop, else_branch.start());
                     self.gen_stmt(vm, else_branch);
                 } else {
-                    self.fill_jump_location_with_current(else_jump, stmt.end());
+                    self.fill_jump_location_with_current(else_jump, stmt_end);
                     self.push_opcode(OpCode::Pop, stmt.start());
                 }
 
-                self.fill_jump_location_with_current(end_jump, stmt.end());
+                self.fill_jump_location_with_current(end_jump, stmt_end);
             }
             Stmt::WhileStmt(stmt) => {
+                let stmt_end = stmt.end();
                 let cond = stmt.cond().unwrap();
                 let body = stmt.body().unwrap();
 
@@ -506,19 +510,20 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 self.gen_expr(vm, cond);
 
                 self.push_opcode(OpCode::JumpIfFalse, body.start());
-                let end_jump = self.allocate_jump_location(body.start());
+                let end_jump = self.allocate_jump_location(stmt_end);
 
                 self.push_opcode(OpCode::Pop, body.start());
                 self.gen_stmt(vm, body);
 
-                self.push_opcode(OpCode::Jump, stmt.end());
-                let start_jump = self.allocate_jump_location(stmt.end());
-                self.fill_jump_location(start_jump, start_loop_ip, stmt.end());
+                self.push_opcode(OpCode::Jump, stmt_end);
+                let start_jump = self.allocate_jump_location(stmt_end);
+                self.fill_jump_location(start_jump, start_loop_ip, stmt_end);
 
-                self.fill_jump_location_with_current(end_jump, stmt.end());
-                self.push_opcode(OpCode::Pop, stmt.end());
+                self.fill_jump_location_with_current(end_jump, stmt_end);
+                self.push_opcode(OpCode::Pop, stmt_end);
             }
             Stmt::ForStmt(stmt) => {
+                let stmt_end = stmt.end();
                 self.begin_block();
 
                 match stmt.init() {
@@ -537,7 +542,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     let position = expr.start();
                     self.gen_expr(vm, expr);
                     self.push_opcode(OpCode::JumpIfFalse, position);
-                    let end_jump = self.allocate_jump_location(position);
+                    let end_jump = self.allocate_jump_location(stmt_end);
                     self.push_opcode(OpCode::Pop, position);
                     end_jump
                 });
@@ -550,16 +555,16 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     self.push_opcode(OpCode::Pop, position);
                 }
 
-                self.push_opcode(OpCode::Jump, stmt.end());
-                let start_jump = self.allocate_jump_location(stmt.end());
-                self.fill_jump_location(start_jump, start_loop_ip, stmt.end());
+                self.push_opcode(OpCode::Jump, stmt_end);
+                let start_jump = self.allocate_jump_location(stmt_end);
+                self.fill_jump_location(start_jump, start_loop_ip, stmt_end);
 
                 if let Some(end_jump) = end_jump {
-                    self.fill_jump_location_with_current(end_jump, stmt.end());
+                    self.fill_jump_location_with_current(end_jump, stmt_end);
                 }
-                self.push_opcode(OpCode::Pop, stmt.end());
+                self.push_opcode(OpCode::Pop, stmt_end);
 
-                self.end_block(stmt.end());
+                self.end_block(stmt_end);
             }
         }
     }
