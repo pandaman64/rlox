@@ -49,12 +49,22 @@ macro_rules! check_top {
 }
 
 macro_rules! binop {
-    ($self:ident, $from_ty:ident, $op:tt, $to_ty:ident) => {{
-        check_top!($self, $from_ty);
-        let v2 = try_pop!($self, $from_ty);
-        check_top!($self, $from_ty);
-        let v1 = try_pop!($self, $from_ty);
-        $self.stack.push($to_ty(v1 $op v2));
+    ($self:ident, $op:tt, $to_ty:ident) => {{
+        match $self.stack.as_slice() {
+            [.., v1, v2] => {
+                let result = match (v1, v2) {
+                    (Value::Number(n1), Value::Number(n2)) => n1 $op n2,
+                    _ => {
+                        eprintln!("Operands must be numbers.");
+                        return InterpretResult::RuntimeError;
+                    }
+                };
+                $self.stack.pop();
+                $self.stack.pop();
+                $self.stack.push(Value::$to_ty(result));
+            },
+            _ => return InterpretResult::CompileError,
+        }
     }};
 }
 
@@ -723,8 +733,8 @@ impl<'w> Vm<'w> {
                     let eq = unsafe { v1.eq(&v2) };
                     self.stack.push(Value::Bool(eq));
                 }
-                Some(Less) => binop!(self, Number, <, Bool),
-                Some(Greater) => binop!(self, Number, >, Bool),
+                Some(Less) => binop!(self, <, Bool),
+                Some(Greater) => binop!(self, >, Bool),
                 Some(Negate) => {
                     check_top!(self, Number);
                     let value = try_pop!(self, Number);
@@ -745,7 +755,7 @@ impl<'w> Vm<'w> {
                     let len = self.stack.len();
                     if len < 2 {
                         eprintln!("insufficient stack");
-                        return InterpretResult::RuntimeError;
+                        return InterpretResult::CompileError;
                     }
                     match &self.stack[len - 2..] {
                         [Object(_), Object(_)] => {
@@ -767,7 +777,7 @@ impl<'w> Vm<'w> {
                             }
                         }
                         [Number(_), Number(_)] => {
-                            binop!(self, Number, +, Number);
+                            binop!(self, +, Number);
                         }
                         [_v2, _v1] => {
                             eprintln!("type mismatch in addition");
@@ -776,9 +786,9 @@ impl<'w> Vm<'w> {
                         _ => unreachable!(),
                     }
                 }
-                Some(Subtract) => binop!(self, Number, -, Number),
-                Some(Multiply) => binop!(self, Number, *, Number),
-                Some(Divide) => binop!(self, Number, /, Number),
+                Some(Subtract) => binop!(self, -, Number),
+                Some(Multiply) => binop!(self, *, Number),
+                Some(Divide) => binop!(self, /, Number),
                 Some(Jump) => {
                     let diff = chunk.read_jump_location(frame.ip);
                     frame.ip = (frame.ip as isize + isize::from(diff)) as usize;
