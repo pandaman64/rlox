@@ -32,22 +32,6 @@ macro_rules! try_pop {
     }};
 }
 
-macro_rules! check_top {
-    ($self:ident, $variant:ident) => {{
-        match $self.stack.last() {
-            Some(Value::$variant(_)) => {}
-            None => {
-                eprintln!("Expected {}, got empty stack", stringify!($variant));
-                return InterpretResult::RuntimeError;
-            }
-            Some(v) => {
-                eprintln!("Expected {}, got {:?}", stringify!($variant), v);
-                return InterpretResult::RuntimeError;
-            }
-        }
-    }};
-}
-
 macro_rules! binop {
     ($self:ident, $op:tt, $to_ty:ident) => {{
         match $self.stack.as_slice() {
@@ -735,11 +719,21 @@ impl<'w> Vm<'w> {
                 }
                 Some(Less) => binop!(self, <, Bool),
                 Some(Greater) => binop!(self, >, Bool),
-                Some(Negate) => {
-                    check_top!(self, Number);
-                    let value = try_pop!(self, Number);
-                    self.stack.push(Number(-value));
-                }
+                Some(Negate) => match self.stack.last() {
+                    None => {
+                        eprintln!("Expected number, got empty stack");
+                        return InterpretResult::CompileError;
+                    }
+                    Some(Number(n)) => {
+                        let value = Number(-n);
+                        self.stack.pop();
+                        self.stack.push(value);
+                    }
+                    Some(_) => {
+                        eprintln!("Operand must be a number.");
+                        return InterpretResult::RuntimeError;
+                    }
+                },
                 Some(Not) => match self.stack.last() {
                     Some(v) => {
                         let falsy = v.is_falsy();
@@ -748,7 +742,7 @@ impl<'w> Vm<'w> {
                     }
                     None => {
                         eprintln!("Expected bool or nil, got empty stack");
-                        return InterpretResult::RuntimeError;
+                        return InterpretResult::CompileError;
                     }
                 },
                 Some(Add) => {

@@ -16,3 +16,11 @@ bob();
 "#;
     run(input, &mut vec![]).unwrap();
 }
+
+#[test]
+fn test_negate() {
+    let input = r#"print -(3); // expect: -3
+print --(3); // expect: 3
+print ---(3); // expect: -3"#;
+    run(input, &mut vec![]).unwrap();
+}
