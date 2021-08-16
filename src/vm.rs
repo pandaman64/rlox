@@ -52,6 +52,11 @@ macro_rules! binop {
     }};
 }
 
+#[cfg(not(miri))]
+const MAX_CALL_FRAME: usize = 65536;
+#[cfg(miri)]
+const MAX_CALL_FRAME: usize = 100;
+
 struct CallFrame {
     closure: RawClosure,
     // the ip for this function
@@ -453,6 +458,10 @@ impl<'w> Vm<'w> {
         // TODO: instead of passing references to frame.ip, keep ip on a register
         // and update it on function call and return as a performance optimization
         loop {
+            if self.frames.len() > MAX_CALL_FRAME {
+                eprintln!("Stack overflow.");
+                return InterpretResult::RuntimeError;
+            }
             let frame = match self.frames.last_mut() {
                 Some(frame) => frame,
                 None => {
