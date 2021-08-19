@@ -166,6 +166,17 @@ pub fn print_codegen_error(error: &CodegenError, root: &SyntaxNode, line_map: &L
             }
             eprintln!(": Can't have more than 255 parameters.");
         }
+        TooManyArguments { position } => {
+            let position = *position;
+            let line = line_map.resolve(position);
+            let token = root.token_at_offset(position.try_into().unwrap());
+            eprint!("[line {}] Error at ", line);
+            match token.right_biased() {
+                Some(token) => eprint!("'{}'", token.text()),
+                None => eprint!("end"),
+            }
+            eprintln!(": Can't have more than 255 arguments.");
+        }
     }
 }
 

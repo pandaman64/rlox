@@ -27,6 +27,7 @@ pub enum CodegenError {
     TooManyLocalVariables { position: usize },
     TooManyConstants { position: usize },
     TooManyParameters { position: usize },
+    TooManyArguments { position: usize },
 }
 
 struct Local {
@@ -442,14 +443,19 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 self.gen_expr(vm, expr.function().unwrap());
                 let mut args = 0;
                 for arg in expr.args() {
+                    let position = arg.start();
                     self.gen_expr(vm, arg);
                     args += 1;
+
+                    if args == 256 {
+                        self.errors
+                            .get_mut()
+                            .push(CodegenError::TooManyArguments { position });
+                        return;
+                    }
                 }
                 self.push_opcode(OpCode::Call, expr.start());
-                self.push_u8(
-                    u8::try_from(args).expect("function call cannot have more than 255 arguments"),
-                    expr.start(),
-                );
+                self.push_u8(u8::try_from(args).unwrap(), expr.start());
             }
         }
     }
