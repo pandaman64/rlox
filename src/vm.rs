@@ -370,6 +370,7 @@ impl<'w> Vm<'w> {
     }
 
     pub fn call(&mut self, args: u8) -> bool {
+        assert!(self.frames.len() < MAX_CALL_FRAME);
         let bp = self.stack.len() - usize::from(args) - 1;
         let callee = *match self.stack.get(bp) {
             Some(Value::Object(callee)) => callee,
@@ -439,7 +440,10 @@ impl<'w> Vm<'w> {
                 let function = closure.function().as_ref();
 
                 // ip is incremented already
-                eprint!("[line {}] in ", function.chunk().line()[frame.ip - 1]);
+                eprint!(
+                    "[line {}] in ",
+                    function.chunk().line()[frame.ip.saturating_sub(1)]
+                );
                 match function.name() {
                     Some(name) => eprintln!("{}()", name.display()),
                     None => eprintln!("script"),
@@ -458,10 +462,6 @@ impl<'w> Vm<'w> {
         // TODO: instead of passing references to frame.ip, keep ip on a register
         // and update it on function call and return as a performance optimization
         loop {
-            if self.frames.len() > MAX_CALL_FRAME {
-                eprintln!("Stack overflow.");
-                return InterpretResult::RuntimeError;
-            }
             let frame = match self.frames.last_mut() {
                 Some(frame) => frame,
                 None => {
@@ -814,6 +814,10 @@ impl<'w> Vm<'w> {
                     let args = function.chunk().code()[frame.ip];
                     frame.ip += 1;
 
+                    if self.frames.len() == MAX_CALL_FRAME {
+                        eprintln!("Stack overflow.");
+                        return InterpretResult::RuntimeError;
+                    }
                     if !self.call(args) {
                         return InterpretResult::RuntimeError;
                     }
