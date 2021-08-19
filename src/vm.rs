@@ -393,7 +393,7 @@ impl<'w> Vm<'w> {
                 unsafe {
                     let function = closure.function().as_ref();
                     if function.arity() != args {
-                        eprintln!("expected {} arguments but got {}", function.arity(), args);
+                        eprintln!("Expected {} arguments but got {}.", function.arity(), args);
                         return false;
                     }
                 }
