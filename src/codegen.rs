@@ -23,6 +23,7 @@ pub enum CodegenError {
     ShadowingInSameScope { ident: String, position: usize },
     UnassignedLocal { ident: Identifier },
     LoopTooLarge { position: usize },
+    ReturnFromTopLevel { position: usize },
 }
 
 struct Local {
@@ -460,7 +461,13 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 self.push_opcode(OpCode::Print, stmt.start());
             }
             Stmt::ReturnStmt(stmt) => match self.kind {
-                FunctionKind::Script => todo!("cannot return from top-level script"),
+                FunctionKind::Script => {
+                    self.errors
+                        .get_mut()
+                        .push(CodegenError::ReturnFromTopLevel {
+                            position: stmt.start(),
+                        })
+                }
                 FunctionKind::Function => {
                     match stmt.expr() {
                         Some(expr) => self.gen_expr(vm, expr),

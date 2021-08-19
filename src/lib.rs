@@ -81,6 +81,10 @@ pub fn print_syntax_error(error: &SyntaxError, root: &SyntaxNode, line_map: &Lin
             let line = line_map.resolve(*position);
             eprintln!("[line {}] Error at '=': Invalid assignment target.", line);
         }
+        UnrecognizedToken { position } => {
+            let line = line_map.resolve(*position);
+            eprintln!("[line {}] Error: Unexpected character.", line);
+        }
         _ => {
             // TODO: adjust error message
             // eprintln!("{:?}", error);
@@ -118,6 +122,17 @@ pub fn print_codegen_error(error: &CodegenError, root: &SyntaxNode, line_map: &L
             }
             eprintln!(": Loop body too large.");
         }
+        ReturnFromTopLevel { position } => {
+            let position = *position;
+            let line = line_map.resolve(position);
+            let token = root.token_at_offset(position.try_into().unwrap());
+            eprint!("[line {}] Error at ", line);
+            match token.left_biased() {
+                Some(token) => eprint!("'{}'", token.text()),
+                None => eprint!("end"),
+            }
+            eprintln!(": Can't return from top-level code.");
+        },
     }
 }
 
