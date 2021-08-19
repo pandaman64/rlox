@@ -1,11 +1,12 @@
 use std::process::Command;
 
+const TEST: &str = "chap24_calls";
+
 #[test]
 fn test_corpus() {
-    let test = "chap24_calls";
     let success = Command::new("dart")
         .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .args(["tool/bin/test.dart", test, "-i", "target/debug/rlox"])
+        .args(["tool/bin/test.dart", TEST, "-i", "target/debug/rlox"])
         .status()
         .expect("failed to run dart test.dart")
         .success();
