@@ -26,6 +26,7 @@ pub enum CodegenError {
     ReturnFromTopLevel { position: usize },
     TooManyLocalVariables { position: usize },
     TooManyConstants { position: usize },
+    TooManyParameters { position: usize },
 }
 
 struct Local {
@@ -638,8 +639,16 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             Decl::FunDecl(decl) => {
                 let name = decl.ident().unwrap();
                 let name = vm.objects_mut().allocate_string(name.to_str().into());
-                let arity = u8::try_from(decl.params().count())
-                    .expect("function cannot have more than 255 arguments");
+                let arity = match u8::try_from(decl.params().count()) {
+                    Ok(arity) => arity,
+                    Err(_) => {
+                        let ident = decl.params().nth(255).unwrap();
+                        self.errors.get_mut().push(CodegenError::TooManyParameters {
+                            position: ident.start(),
+                        });
+                        return;
+                    }
+                };
                 let mut compiler = Compiler::new_function(
                     self,
                     name,
