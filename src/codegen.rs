@@ -24,6 +24,7 @@ pub enum CodegenError {
     UnassignedLocal { ident: Identifier },
     LoopTooLarge { position: usize },
     ReturnFromTopLevel { position: usize },
+    TooManyLocalVariables { position: usize },
 }
 
 struct Local {
@@ -114,11 +115,6 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     }
 
     fn push_local(&mut self, ident: Identifier) {
-        assert!(
-            self.locals.len() < 256,
-            "more than 255 local variables are not supported"
-        );
-
         let name = ident.to_str();
         for local in self.locals.iter().rev() {
             if local.depth != self.block_depth {
@@ -136,11 +132,19 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             }
         }
 
-        self.locals.push(Local {
-            ident: name.into(),
-            depth: UNASSIGNED,
-            captured: Cell::new(false),
-        });
+        if self.locals.len() < 256 {
+            self.locals.push(Local {
+                ident: name.into(),
+                depth: UNASSIGNED,
+                captured: Cell::new(false),
+            });
+        } else {
+            self.errors
+                .get_mut()
+                .push(CodegenError::TooManyLocalVariables {
+                    position: ident.start(),
+                });
+        }
     }
 
     fn begin_block(&mut self) {
@@ -588,8 +592,10 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             let idx = self.locals.len();
             self.push_local(ident);
             gen_value(self, vm);
-            assert_eq!(idx + 1, self.locals.len());
-            self.locals[idx].depth = self.block_depth;
+            // it is possible that the locals slot overflows and this local is not inserted
+            if idx < self.locals.len() {
+                self.locals[idx].depth = self.block_depth;
+            }
         } else {
             let ident = vm.objects_mut().allocate_string(ident.to_str().into());
             let index = self.push_constant(Value::Object(ident.into_raw_obj()));
