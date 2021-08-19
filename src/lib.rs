@@ -132,7 +132,7 @@ pub fn print_codegen_error(error: &CodegenError, root: &SyntaxNode, line_map: &L
                 None => eprint!("end"),
             }
             eprintln!(": Can't return from top-level code.");
-        },
+        }
     }
 }
 

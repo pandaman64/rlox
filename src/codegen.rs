@@ -440,12 +440,16 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         }
     }
 
-    fn gen_block_stmt(&mut self, vm: &mut Vm<'_>, stmt: BlockStmt) {
-        self.begin_block();
+    fn gen_block_stmt(&mut self, vm: &mut Vm<'_>, stmt: BlockStmt, start_block: bool) {
+        if start_block {
+            self.begin_block();
+        }
         for decl in stmt.decls() {
             self.gen_decl(vm, decl);
         }
-        self.end_block(stmt.start());
+        if start_block {
+            self.end_block(stmt.start());
+        }
     }
 
     fn gen_stmt(&mut self, vm: &mut Vm<'_>, stmt: Stmt) {
@@ -476,7 +480,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     self.push_opcode(OpCode::Return, stmt.start());
                 }
             },
-            Stmt::BlockStmt(stmt) => self.gen_block_stmt(vm, stmt),
+            Stmt::BlockStmt(stmt) => self.gen_block_stmt(vm, stmt, true),
             Stmt::IfStmt(stmt) => {
                 let stmt_end = stmt.end();
                 let cond = stmt.cond().unwrap();
@@ -632,7 +636,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     compiler.push_local(param);
                     compiler.locals.last_mut().unwrap().depth = compiler.block_depth;
                 }
-                compiler.gen_block_stmt(vm, decl.body().unwrap());
+                compiler.gen_block_stmt(vm, decl.body().unwrap(), false);
                 compiler.end_block(decl.start());
                 let (mut function, upvalues, errors) = compiler.finish().unwrap();
                 *function.upvalues_mut() = u8::try_from(upvalues.len()).unwrap();
