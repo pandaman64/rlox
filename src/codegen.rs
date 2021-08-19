@@ -25,6 +25,7 @@ pub enum CodegenError {
     LoopTooLarge { position: usize },
     ReturnFromTopLevel { position: usize },
     TooManyLocalVariables { position: usize },
+    TooManyConstants { position: usize },
 }
 
 struct Local {
@@ -232,8 +233,9 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 u8::try_from(i).unwrap(),
             )
         } else {
+            let position = ident.start();
             let ident = vm.objects_mut().allocate_string(ident.to_str().into());
-            let index = self.push_constant(Value::Object(ident.into_raw_obj()));
+            let index = self.push_constant(Value::Object(ident.into_raw_obj()), position);
 
             (OpCode::GetGlobal, OpCode::SetGlobal, index)
         }
@@ -249,8 +251,15 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         self.function.chunk_mut().push_code(constant, line);
     }
 
-    fn push_constant(&mut self, value: Value) -> u8 {
-        self.function.chunk_mut().push_constant(value)
+    fn push_constant(&mut self, value: Value, position: usize) -> u8 {
+        if self.function.chunk().constants().len() < 256 {
+            self.function.chunk_mut().push_constant(value)
+        } else {
+            self.errors
+                .get_mut()
+                .push(CodegenError::TooManyConstants { position });
+            0
+        }
     }
 
     fn allocate_jump_location(&mut self, position: usize) -> usize {
@@ -418,12 +427,12 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 }
                 Primary::StringLiteral(s) => {
                     let obj = vm.objects_mut().allocate_string(s.to_str().into());
-                    let index = self.push_constant(Value::Object(obj.into_raw_obj()));
+                    let index = self.push_constant(Value::Object(obj.into_raw_obj()), s.start());
                     self.push_opcode(OpCode::Constant, s.start());
                     self.push_u8(index, s.start());
                 }
                 Primary::NumberLiteral(num) => {
-                    let index = self.push_constant(Value::Number(num.to_number()));
+                    let index = self.push_constant(Value::Number(num.to_number()), num.start());
                     self.push_opcode(OpCode::Constant, num.start());
                     self.push_u8(index, num.start());
                 }
@@ -597,8 +606,9 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 self.locals[idx].depth = self.block_depth;
             }
         } else {
+            let position = ident.start();
             let ident = vm.objects_mut().allocate_string(ident.to_str().into());
-            let index = self.push_constant(Value::Object(ident.into_raw_obj()));
+            let index = self.push_constant(Value::Object(ident.into_raw_obj()), position);
             let position = gen_value(self, vm);
             self.push_opcode(OpCode::DefineGlobal, position);
             self.push_u8(index, position);
@@ -650,7 +660,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 let fun_obj = vm.objects_mut().allocate_function(function);
 
                 self.define_variable(vm, decl.ident().unwrap(), move |this, _vm| {
-                    let index = this.push_constant(Value::Object(fun_obj));
+                    let index = this.push_constant(Value::Object(fun_obj), decl.start());
                     this.push_opcode(OpCode::Closure, decl.start());
                     this.push_u8(index, decl.start());
 
