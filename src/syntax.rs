@@ -58,7 +58,7 @@ pub enum SyntaxKind {
     #[token("<=")]
     LessEqualToken,
 
-    #[regex("[a-zA-Z][a-zA-Z0-9]*")]
+    #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     IdentifierToken,
     // not supporting escape sequence
     #[regex(r#""[^"]*"?"#)]
