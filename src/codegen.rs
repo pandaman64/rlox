@@ -28,6 +28,7 @@ pub enum CodegenError {
     TooManyConstants { position: usize },
     TooManyParameters { position: usize },
     TooManyArguments { position: usize },
+    TooManyUpvalues { position: usize },
 }
 
 struct Local {
@@ -191,7 +192,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             .map(|(i, _)| i)
     }
 
-    fn add_upvalue(&self, index: u8, is_local: bool) -> usize {
+    fn add_upvalue(&self, index: u8, is_local: bool, position: usize) -> usize {
         let mut upvalues = self.upvalues.borrow_mut();
 
         if let Some(i) = upvalues
@@ -203,24 +204,28 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
         let ret = upvalues.len();
 
-        if ret > 255 {
-            panic!("closure cannot have more than 255 upvalues");
+        if ret < 256 {
+            upvalues.push(Upvalue { index, is_local });
+            ret
+        } else {
+            self.errors
+                .borrow_mut()
+                .push(CodegenError::TooManyUpvalues { position });
+            255
         }
-
-        upvalues.push(Upvalue { index, is_local });
-        ret
     }
 
     fn resolve_upvalue(&self, ident: Identifier) -> Option<usize> {
         let parent = self.parent?;
+        let position = ident.start();
         match parent.resolve_local(ident.clone()) {
             Some(local) => {
                 parent.locals[local].captured.set(true);
-                Some(self.add_upvalue(u8::try_from(local).unwrap(), true))
+                Some(self.add_upvalue(u8::try_from(local).unwrap(), true, position))
             }
             None => {
                 let index = parent.resolve_upvalue(ident)?;
-                Some(self.add_upvalue(u8::try_from(index).unwrap(), false))
+                Some(self.add_upvalue(u8::try_from(index).unwrap(), false, position))
             }
         }
     }
@@ -670,7 +675,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 compiler.gen_block_stmt(vm, decl.body().unwrap(), false);
                 compiler.end_block(decl.start());
                 let (mut function, upvalues, errors) = compiler.finish().unwrap();
-                *function.upvalues_mut() = u8::try_from(upvalues.len()).unwrap();
+                *function.upvalues_mut() = u8::try_from(upvalues.len()).unwrap_or(255);
                 self.errors.get_mut().extend(errors);
                 let fun_obj = vm.objects_mut().allocate_function(function);
 

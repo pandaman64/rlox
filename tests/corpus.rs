@@ -1,6 +1,6 @@
 use std::process::Command;
 
-const TEST: &str = "chap24_calls";
+const TEST: &str = "chap25_closures";
 
 #[test]
 fn test_corpus() {
