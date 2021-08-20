@@ -605,16 +605,26 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         }
     }
 
-    fn define_variable<F>(&mut self, vm: &mut Vm<'_>, ident: Identifier, gen_value: F)
-    where
+    fn define_variable<F>(
+        &mut self,
+        vm: &mut Vm<'_>,
+        ident: Identifier,
+        gen_value: F,
+        allow_reference_in_value: bool,
+    ) where
         F: FnOnce(&mut Self, &mut Vm<'_>) -> usize,
     {
         if self.block_depth > GLOBAL_BLOCK {
             let idx = self.locals.len();
             self.push_local(ident);
+            // if allow_reference_in_value is set, we declare that the local is initialized already,
+            // so that the generated value can refer to the variable defined.
+            if allow_reference_in_value {
+                self.locals[idx].depth = self.block_depth;
+            }
             gen_value(self, vm);
             // it is possible that the locals slot overflows and this local is not inserted
-            if idx < self.locals.len() {
+            if !allow_reference_in_value && idx < self.locals.len() {
                 self.locals[idx].depth = self.block_depth;
             }
         } else {
@@ -630,16 +640,21 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     fn gen_var_decl(&mut self, vm: &mut Vm<'_>, decl: VarDecl) {
         let ident = decl.ident().unwrap();
         let expr = decl.expr();
-        self.define_variable(vm, ident, move |this, vm| match expr {
-            Some(expr) => {
-                this.gen_expr(vm, expr);
-                decl.start()
-            }
-            None => {
-                this.push_opcode(OpCode::Nil, decl.start());
-                decl.start()
-            }
-        });
+        self.define_variable(
+            vm,
+            ident,
+            move |this, vm| match expr {
+                Some(expr) => {
+                    this.gen_expr(vm, expr);
+                    decl.start()
+                }
+                None => {
+                    this.push_opcode(OpCode::Nil, decl.start());
+                    decl.start()
+                }
+            },
+            false,
+        );
     }
 
     pub fn gen_decl(&mut self, vm: &mut Vm<'_>, decl: Decl) {
@@ -660,38 +675,46 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         return;
                     }
                 };
-                let mut compiler = Compiler::new_function(
-                    self,
-                    name,
-                    arity,
-                    self.line_map,
-                    decl.return_position(),
+
+                self.define_variable(
+                    vm,
+                    decl.ident().unwrap(),
+                    move |this, vm| {
+                        let mut compiler = Compiler::new_function(
+                            this,
+                            name,
+                            arity,
+                            this.line_map,
+                            decl.return_position(),
+                        );
+                        compiler.begin_block();
+                        for param in decl.params() {
+                            compiler.push_local(param);
+                            compiler.locals.last_mut().unwrap().depth = compiler.block_depth;
+                        }
+                        compiler.gen_block_stmt(vm, decl.body().unwrap(), false);
+                        compiler.end_block(decl.start());
+                        let (mut function, upvalues, errors) = compiler.finish().unwrap();
+                        *function.upvalues_mut() = u8::try_from(upvalues.len()).unwrap_or(255);
+                        this.errors.get_mut().extend(errors);
+                        let fun_obj = vm.objects_mut().allocate_function(function);
+
+                        let index = this.push_constant(Value::Object(fun_obj), decl.start());
+                        this.push_opcode(OpCode::Closure, decl.start());
+                        this.push_u8(index, decl.start());
+
+                        for upvalue in upvalues.iter() {
+                            let is_local = if upvalue.is_local { 1 } else { 0 };
+                            this.push_u8(is_local, decl.start());
+                            this.push_u8(upvalue.index, decl.start());
+                        }
+
+                        decl.start()
+                    },
+                    // functions can refer to themselves inside their body because they are executed
+                    // only after the initialization.
+                    true,
                 );
-                compiler.begin_block();
-                for param in decl.params() {
-                    compiler.push_local(param);
-                    compiler.locals.last_mut().unwrap().depth = compiler.block_depth;
-                }
-                compiler.gen_block_stmt(vm, decl.body().unwrap(), false);
-                compiler.end_block(decl.start());
-                let (mut function, upvalues, errors) = compiler.finish().unwrap();
-                *function.upvalues_mut() = u8::try_from(upvalues.len()).unwrap_or(255);
-                self.errors.get_mut().extend(errors);
-                let fun_obj = vm.objects_mut().allocate_function(function);
-
-                self.define_variable(vm, decl.ident().unwrap(), move |this, _vm| {
-                    let index = this.push_constant(Value::Object(fun_obj), decl.start());
-                    this.push_opcode(OpCode::Closure, decl.start());
-                    this.push_u8(index, decl.start());
-
-                    for upvalue in upvalues.iter() {
-                        let is_local = if upvalue.is_local { 1 } else { 0 };
-                        this.push_u8(is_local, decl.start());
-                        this.push_u8(upvalue.index, decl.start());
-                    }
-
-                    decl.start()
-                });
             }
             Decl::Stmt(stmt) => self.gen_stmt(vm, stmt),
         }
