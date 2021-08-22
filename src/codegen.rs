@@ -12,7 +12,7 @@ use crate::{
     table::InternedStr,
     value::Value,
     vm::{
-        object::{self, RawFunction},
+        object::{self, RawFunction, RawObject},
         Vm,
     },
 };
@@ -73,7 +73,7 @@ fn new_locals() -> Vec<Local> {
     ]
 }
 
-fn mark_nothing() {}
+fn mark_nothing(_worklist: &mut Vec<RawObject>) {}
 
 impl<'parent, 'map> Compiler<'parent, 'map> {
     pub fn new_script(vm: &mut Vm<'_>, line_map: &'map LineMap) -> Self {
@@ -111,11 +111,11 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         }
     }
 
-    fn mark(&self) -> impl FnOnce() + '_ {
-        move || {
+    fn mark(&self) -> impl FnOnce(&mut Vec<RawObject>) + '_ {
+        move |worklist| {
             // SAFETY: self owns the function and must not be deallocated by vm
             unsafe {
-                object::mark(self.function.cast());
+                object::mark(self.function.cast(), worklist);
             }
         }
     }

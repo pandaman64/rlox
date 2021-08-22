@@ -1,6 +1,7 @@
-use std::ptr::{self, addr_of_mut, NonNull};
+use std::ptr::{self, NonNull};
 
 use crate::{
+    log_gc,
     opcode::Chunk,
     table::InternedStr,
     value::{self, Value},
@@ -83,11 +84,59 @@ pub unsafe fn as_ref<'a>(obj: RawObject) -> ObjectRef<'a> {
 
 /// # Safety
 /// The object must be valid
-pub unsafe fn mark(obj: RawObject) {
-    let ptr = obj.as_ptr();
-    let marked_ptr = addr_of_mut!((*ptr).marked);
+pub unsafe fn mark(obj: RawObject, worklist: &mut Vec<RawObject>) {
     unsafe {
+        let ptr = obj.as_ptr();
+        let marked_ptr = ptr::addr_of_mut!((*ptr).marked);
+
+        if ptr::read(marked_ptr) {
+            return;
+        }
+
+        worklist.push(obj);
         ptr::write(marked_ptr, true);
+    }
+}
+
+/// # Safety
+/// The object must be valid
+pub unsafe fn blacken(obj: RawObject, worklist: &mut Vec<RawObject>) {
+    // SAFETY: object is valid
+    unsafe {
+        let ptr = obj.as_ptr();
+        let kind_ptr = ptr::addr_of!((*ptr).kind);
+
+        if log_gc() {
+            eprintln!(
+                "-- gc: {:?} blacken {}",
+                obj,
+                Value::Object(obj).format_args()
+            );
+        }
+
+        match ptr::read(kind_ptr) {
+            ObjectKind::Str | ObjectKind::NativeFunction => {}
+            ObjectKind::Function => {
+                let function: *mut Function = ptr.cast();
+                if let Some(name) = (*function).name {
+                    mark(name.into_raw_obj(), worklist);
+                }
+                for constant in (*function).chunk.constants() {
+                    constant.mark(worklist);
+                }
+            }
+            ObjectKind::Closure => {
+                let closure: *mut Closure = ptr.cast();
+                mark((*closure).function.cast(), worklist);
+                for upvalue in (*closure).upvalues.iter().flatten() {
+                    mark(upvalue.cast(), worklist);
+                }
+            }
+            ObjectKind::Upvalue => {
+                let upvalue: *mut Upvalue = ptr.cast();
+                (*upvalue).closed_value.mark(worklist);
+            }
+        }
     }
 }
 

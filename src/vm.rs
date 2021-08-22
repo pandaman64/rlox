@@ -80,7 +80,7 @@ pub enum InterpretResult {
     RuntimeError,
 }
 
-fn mark_nothing() {}
+fn mark_nothing(_worklist: &mut Vec<RawObject>) {}
 
 struct Objects {
     objects_head: Option<RawObject>,
@@ -99,7 +99,7 @@ impl Objects {
         }
     }
 
-    fn allocate_object<T, F: FnOnce()>(
+    fn allocate_object<T, F: FnOnce(&mut Vec<RawObject>)>(
         &mut self,
         obj: T,
         stack: &[Value],
@@ -151,7 +151,7 @@ impl Objects {
         }
     }
 
-    fn allocate_string<F: FnOnce()>(
+    fn allocate_string<F: FnOnce(&mut Vec<RawObject>)>(
         &mut self,
         content: String,
         stack: &[Value],
@@ -181,7 +181,7 @@ impl Objects {
         }
     }
 
-    fn allocate_script<F: FnOnce()>(
+    fn allocate_script<F: FnOnce(&mut Vec<RawObject>)>(
         &mut self,
         stack: &[Value],
         frames: &[CallFrame],
@@ -196,7 +196,7 @@ impl Objects {
         obj.cast()
     }
 
-    fn allocate_function<F: FnOnce()>(
+    fn allocate_function<F: FnOnce(&mut Vec<RawObject>)>(
         &mut self,
         name: InternedStr,
         arity: u8,
@@ -312,7 +312,7 @@ impl Objects {
         }
     }
 
-    fn collect_garbage<F: FnOnce()>(
+    fn collect_garbage<F: FnOnce(&mut Vec<RawObject>)>(
         &mut self,
         stack: &[Value],
         frames: &[CallFrame],
@@ -320,37 +320,44 @@ impl Objects {
     ) {
         // N.B. it's ok that these functions take shared references to values and objects because
         // we read a writable pointer to the allocation through the shared references.
-        fn mark_roots(stack: &[Value]) {
+        fn mark_roots(stack: &[Value], worklist: &mut Vec<RawObject>) {
             for value in stack.iter() {
                 // SAFETY: GC keeps the objects in the stack valid
                 unsafe {
-                    value.mark();
+                    value.mark(worklist);
                 }
             }
         }
-        fn mark_table(table: &HashMap<Key, Value>) {
+        fn mark_table(table: &HashMap<Key, Value>, worklist: &mut Vec<RawObject>) {
             for (key, value) in table.iter() {
                 let key = key.into_raw_obj();
                 unsafe {
-                    object::mark(key);
-                    value.mark();
+                    object::mark(key, worklist);
+                    value.mark(worklist);
                 }
             }
         }
-        fn mark_call_frames(frames: &[CallFrame]) {
+        fn mark_call_frames(frames: &[CallFrame], worklist: &mut Vec<RawObject>) {
             for frame in frames.iter() {
                 let obj = frame.closure.cast();
                 unsafe {
-                    object::mark(obj);
+                    object::mark(obj, worklist);
                 }
             }
         }
-        fn mark_upvalues(mut head: Option<RawUpvalue>) {
+        fn mark_upvalues(mut head: Option<RawUpvalue>, worklist: &mut Vec<RawObject>) {
             while let Some(upvalue) = head {
                 unsafe {
-                    object::mark(upvalue.cast());
+                    object::mark(upvalue.cast(), worklist);
                     let upvalue = upvalue.as_ref();
                     head = upvalue.next();
+                }
+            }
+        }
+        fn trace_references(worklist: &mut Vec<RawObject>) {
+            while let Some(obj) = worklist.pop() {
+                unsafe {
+                    object::blacken(obj, worklist);
                 }
             }
         }
@@ -360,11 +367,16 @@ impl Objects {
             eprintln!("-- gc begin");
         }
 
-        mark_roots(stack);
-        mark_table(&self.globals);
-        mark_call_frames(frames);
-        mark_upvalues(self.open_upvalues_head);
-        mark_compiler_roots();
+        // TODO: tune initial capacity?
+        let mut worklist = vec![];
+
+        mark_roots(stack, &mut worklist);
+        mark_table(&self.globals, &mut worklist);
+        mark_call_frames(frames, &mut worklist);
+        mark_upvalues(self.open_upvalues_head, &mut worklist);
+        mark_compiler_roots(&mut worklist);
+
+        trace_references(&mut worklist);
 
         if log {
             eprintln!("-- gc end");
@@ -460,7 +472,7 @@ impl<'w> Vm<'w> {
         }
     }
 
-    pub fn allocate_string<F: FnOnce()>(
+    pub fn allocate_string<F: FnOnce(&mut Vec<RawObject>)>(
         &mut self,
         content: String,
         mark_compiler_roots: F,
@@ -469,12 +481,15 @@ impl<'w> Vm<'w> {
             .allocate_string(content, &self.stack, &self.frames, mark_compiler_roots)
     }
 
-    pub fn allocate_script<F: FnOnce()>(&mut self, mark_compiler_roots: F) -> RawFunction {
+    pub fn allocate_script<F: FnOnce(&mut Vec<RawObject>)>(
+        &mut self,
+        mark_compiler_roots: F,
+    ) -> RawFunction {
         self.objects
             .allocate_script(&self.stack, &self.frames, mark_compiler_roots)
     }
 
-    pub fn allocate_function<F: FnOnce()>(
+    pub fn allocate_function<F: FnOnce(&mut Vec<RawObject>)>(
         &mut self,
         name: InternedStr,
         arity: u8,

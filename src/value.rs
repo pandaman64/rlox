@@ -110,11 +110,11 @@ impl Value {
 
     /// # Safety
     /// this object must be valid
-    pub unsafe fn mark(&self) {
+    pub unsafe fn mark(&self, worklist: &mut Vec<RawObject>) {
         if let Value::Object(obj) = self {
             // SAFETY: the object is valid
             unsafe {
-                object::mark(*obj);
+                object::mark(*obj, worklist);
             }
         }
     }
