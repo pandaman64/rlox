@@ -1038,13 +1038,9 @@ impl<'w> Vm<'w> {
                         return InterpretResult::CompileError;
                     }
                     match &self.stack[len - 2..] {
-                        [Object(_), Object(_)] => {
-                            // we will be adding other variants
-                            let o2 = try_pop!(self, Object);
-                            let o1 = try_pop!(self, Object);
-
+                        [Object(o1), Object(o2)] => {
                             // SAFETY: these objects are valid
-                            match unsafe { (object::as_ref(o1), object::as_ref(o2)) } {
+                            match unsafe { (object::as_ref(*o1), object::as_ref(*o2)) } {
                                 (ObjectRef::Str(o1), ObjectRef::Str(o2)) => {
                                     let result = o1.as_rust_str().to_string() + o2.as_rust_str();
                                     let obj = objects.allocate_string(
@@ -1053,6 +1049,8 @@ impl<'w> Vm<'w> {
                                         &self.frames,
                                         mark_nothing,
                                     );
+                                    self.stack.pop();
+                                    self.stack.pop();
                                     self.stack.push(Value::Object(obj.into_raw_obj()));
                                 }
                                 _ => {
