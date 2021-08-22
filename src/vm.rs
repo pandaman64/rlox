@@ -467,6 +467,7 @@ fn extract_constant_key(ip: &mut usize, chunk: &Chunk) -> Option<Key> {
 /// # Safety
 /// obj must be valid and allocated by allocate_object
 unsafe fn free_object(obj: RawObject) -> Option<RawObject> {
+    let log = log_gc();
     unsafe {
         // SAFETY:
         // since we carefully avoid using references in this implementation, all pointers
@@ -484,7 +485,7 @@ unsafe fn free_object(obj: RawObject) -> Option<RawObject> {
         macro_rules! free {
             ($ptr:expr, $ty:ident) => {{
                 let ptr = $ptr as *mut object::$ty;
-                if log_gc() {
+                if log {
                     eprintln!("-- gc: {:?} free type {}", ptr, stringify!($ty));
                 }
                 drop(Box::from_raw(ptr));
