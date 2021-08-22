@@ -1,10 +1,6 @@
-use std::ptr::{self, NonNull};
+use std::ptr::{self, addr_of_mut, NonNull};
 
-use crate::{
-    opcode::Chunk,
-    table::InternedStr,
-    value::{self, Value},
-};
+use crate::{opcode::Chunk, table::InternedStr, value::{self, Value}};
 
 // the pointer must have valid provenance not only for the header but the whole object
 // pub type RawValue = NonNull<Value>;
@@ -26,8 +22,19 @@ pub enum ObjectKind {
 #[repr(C)]
 pub struct Header {
     pub kind: ObjectKind,
+    pub marked: bool,
     // prev: RawObject,
     pub next: Option<RawObject>,
+}
+
+impl Header {
+    fn new(kind: ObjectKind) -> Self {
+        Self {
+            kind,
+            marked: false,
+            next: None,
+        }
+    }
 }
 
 pub enum ObjectRef<'a> {
@@ -70,6 +77,16 @@ pub unsafe fn as_ref<'a>(obj: RawObject) -> ObjectRef<'a> {
     }
 }
 
+/// # Safety
+/// The object must be valid
+pub unsafe fn mark(obj: RawObject) {
+    let ptr = obj.as_ptr();
+    let marked_ptr = addr_of_mut!((*ptr).marked);
+    unsafe {
+        ptr::write(marked_ptr, true);
+    }
+}
+
 // TODO: inline string contents to shave off one allocation
 #[repr(C)]
 pub struct Str {
@@ -80,10 +97,7 @@ pub struct Str {
 impl Str {
     pub fn new(content: String) -> Self {
         Self {
-            header: Header {
-                kind: ObjectKind::Str,
-                next: None,
-            },
+            header: Header::new(ObjectKind::Str),
             content,
         }
     }
@@ -105,10 +119,7 @@ pub struct Function {
 impl Function {
     pub fn new_script() -> Self {
         Self {
-            header: Header {
-                kind: ObjectKind::Function,
-                next: None,
-            },
+            header: Header::new(ObjectKind::Function),
             arity: 0,
             upvalues: 0,
             chunk: Chunk::new(),
@@ -118,10 +129,7 @@ impl Function {
 
     pub fn new_function(name: InternedStr, arity: u8, upvalues: u8) -> Self {
         Self {
-            header: Header {
-                kind: ObjectKind::Function,
-                next: None,
-            },
+            header: Header::new(ObjectKind::Function),
             arity,
             upvalues,
             chunk: Chunk::new(),
@@ -177,10 +185,7 @@ pub struct NativeFunction {
 impl NativeFunction {
     pub fn new(fun: fn(args: &[Value]) -> Value) -> Self {
         Self {
-            header: Header {
-                kind: ObjectKind::NativeFunction,
-                next: None,
-            },
+            header: Header::new(ObjectKind::NativeFunction),
             fun,
         }
     }
@@ -205,10 +210,7 @@ impl Closure {
         // SAFETY: given function is valid
         let num_upvalues = unsafe { function.as_ref().upvalues() };
         Self {
-            header: Header {
-                kind: ObjectKind::Closure,
-                next: None,
-            },
+            header: Header::new(ObjectKind::Closure),
             function,
             upvalues: vec![None; usize::from(num_upvalues)],
         }
@@ -241,10 +243,7 @@ pub struct Upvalue {
 impl Upvalue {
     pub fn new_stack(stack_index: usize, next: Option<RawUpvalue>) -> Self {
         Self {
-            header: Header {
-                kind: ObjectKind::Upvalue,
-                next: None,
-            },
+            header: Header::new(ObjectKind::Upvalue),
             next,
             stack_index,
             closed_value: Value::Nil,
