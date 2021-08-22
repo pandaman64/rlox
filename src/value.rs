@@ -1,7 +1,7 @@
 use core::fmt;
 use std::ptr;
 
-use crate::object::{self, ObjectRef, RawObject};
+use crate::vm::object::{self, ObjectRef, RawObject};
 
 // we intentionally omit Copy so that cloning values is more explicit
 #[derive(Debug, Clone)]
@@ -106,5 +106,16 @@ impl Value {
         use Value::*;
 
         matches!(self, Nil | Bool(false))
+    }
+
+    /// # Safety
+    /// this object must be valid
+    pub unsafe fn mark(&self) {
+        if let Value::Object(obj) = self {
+            // SAFETY: the object is valid
+            unsafe {
+                object::mark(*obj);
+            }
+        }
     }
 }

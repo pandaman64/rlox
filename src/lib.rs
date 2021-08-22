@@ -4,7 +4,6 @@
 pub mod ast;
 pub mod codegen;
 pub mod line_map;
-pub mod object;
 pub mod opcode;
 pub mod syntax;
 pub mod table;
@@ -23,7 +22,6 @@ use std::{
 use ast::Root;
 use codegen::{CodegenError, Compiler};
 use line_map::LineMap;
-use object::NativeFunction;
 use regex::Regex;
 use syntax::{SyntaxError, SyntaxNode};
 use vm::Vm;
@@ -45,6 +43,28 @@ pub fn trace_available() -> bool {
 
     ONCE.call_once(|| {
         let config = matches!(std::env::var("RUST_LOG"), Ok(s) if s == "trace");
+        AVAILABLE.store(config, atomic::Ordering::Relaxed);
+    });
+    AVAILABLE.load(atomic::Ordering::Relaxed)
+}
+
+pub fn stress_gc() -> bool {
+    static AVAILABLE: AtomicBool = AtomicBool::new(false);
+    static ONCE: Once = Once::new();
+
+    ONCE.call_once(|| {
+        let config = matches!(std::env::var("RLOX_STRESS_GC"), Ok(s) if s == "1");
+        AVAILABLE.store(config, atomic::Ordering::Relaxed);
+    });
+    AVAILABLE.load(atomic::Ordering::Relaxed)
+}
+
+pub fn log_gc() -> bool {
+    static AVAILABLE: AtomicBool = AtomicBool::new(false);
+    static ONCE: Once = Once::new();
+
+    ONCE.call_once(|| {
+        let config = matches!(std::env::var("RLOX_LOG_GC"), Ok(s) if s == "1");
         AVAILABLE.store(config, atomic::Ordering::Relaxed);
     });
     AVAILABLE.load(atomic::Ordering::Relaxed)
@@ -193,18 +213,15 @@ pub fn print_codegen_error(error: &CodegenError, root: &SyntaxNode, line_map: &L
 
 pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
     let mut vm = Vm::new(&mut stdout);
-    vm.define_native_function(
-        "clock".into(),
-        NativeFunction::new(|_args| {
-            use std::time::*;
-            use value::Value;
+    vm.define_native_function("clock".into(), |_args| {
+        use std::time::*;
+        use value::Value;
 
-            let now = SystemTime::now();
-            let duration = now.duration_since(UNIX_EPOCH).unwrap();
+        let now = SystemTime::now();
+        let duration = now.duration_since(UNIX_EPOCH).unwrap();
 
-            Value::Number(duration.as_secs_f64())
-        }),
-    );
+        Value::Number(duration.as_secs_f64())
+    });
 
     let line_map = {
         let mut line_map = LineMap::new();
@@ -226,7 +243,7 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
         return Err(Error::Syntax);
     }
 
-    let mut compiler = Compiler::new_script(&line_map);
+    let mut compiler = Compiler::new_script(&mut vm, &line_map);
     let root = Root::cast(node.clone()).unwrap();
     for decl in root.decls() {
         compiler.gen_decl(&mut vm, decl);
@@ -245,7 +262,8 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
             return Err(Error::Codegen);
         }
         assert!(upvalues.is_empty());
-        function.trace();
+        // SAFETY: compiler returns a valid function
+        function.as_ref().trace();
 
         vm.reset(function);
         vm.call(0);
@@ -259,7 +277,7 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
 
     // SAFETY: we don't reuse vm and chunk, so no code can refer to deallocated objects.
     unsafe {
-        vm.objects_mut().free_all_objects();
+        vm.free_all_objects();
     }
 
     result

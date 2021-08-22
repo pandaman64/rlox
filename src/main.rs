@@ -8,7 +8,6 @@ use rlox::{
     ast::Root,
     codegen::Compiler,
     line_map::LineMap,
-    object::NativeFunction,
     run, trace_available,
     vm::{InterpretResult, Vm},
 };
@@ -22,18 +21,15 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
     let mut stdout = stdout.lock();
 
     let mut vm = Vm::new(&mut stdout);
-    vm.define_native_function(
-        "clock".into(),
-        NativeFunction::new(|_args| {
-            use rlox::value::Value;
-            use std::time::*;
+    vm.define_native_function("clock".into(), |_args| {
+        use rlox::value::Value;
+        use std::time::*;
 
-            let now = SystemTime::now();
-            let duration = now.duration_since(UNIX_EPOCH).unwrap();
+        let now = SystemTime::now();
+        let duration = now.duration_since(UNIX_EPOCH).unwrap();
 
-            Value::Number(duration.as_secs_f64())
-        }),
-    );
+        Value::Number(duration.as_secs_f64())
+    });
 
     loop {
         line.clear();
@@ -60,7 +56,7 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
             continue;
         }
 
-        let mut compiler = Compiler::new_script(&line_map);
+        let mut compiler = Compiler::new_script(&mut vm, &line_map);
         match Root::cast(node.clone()) {
             None => {
                 eprintln!("syntax error");
@@ -85,7 +81,8 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
                 continue;
             }
             assert!(upvalues.is_empty());
-            function.trace();
+            // SAFETY: compiler returns a valid function
+            function.as_ref().trace();
 
             vm.reset(function);
             vm.call(0);
@@ -97,7 +94,7 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
 
     // SAFETY: we don't reuse vm and chunk, so no code can refer to deallocated objects.
     unsafe {
-        vm.objects_mut().free_all_objects();
+        vm.free_all_objects();
     }
 
     Ok(())

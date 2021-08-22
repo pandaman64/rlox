@@ -4,9 +4,9 @@ use num_derive::{FromPrimitive, ToPrimitive};
 use std::{convert::TryFrom, fmt, num::TryFromIntError};
 
 use crate::{
-    object::{self, ObjectRef},
     trace_available,
     value::Value,
+    vm::object::{self, ObjectRef},
 };
 
 #[repr(u8)]

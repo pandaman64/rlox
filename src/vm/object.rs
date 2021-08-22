@@ -1,6 +1,10 @@
 use std::ptr::{self, addr_of_mut, NonNull};
 
-use crate::{opcode::Chunk, table::InternedStr, value::{self, Value}};
+use crate::{
+    opcode::Chunk,
+    table::InternedStr,
+    value::{self, Value},
+};
 
 // the pointer must have valid provenance not only for the header but the whole object
 // pub type RawValue = NonNull<Value>;
@@ -95,7 +99,7 @@ pub struct Str {
 }
 
 impl Str {
-    pub fn new(content: String) -> Self {
+    pub(in crate::vm) fn new(content: String) -> Self {
         Self {
             header: Header::new(ObjectKind::Str),
             content,
@@ -117,7 +121,7 @@ pub struct Function {
 }
 
 impl Function {
-    pub fn new_script() -> Self {
+    pub(in crate::vm) fn new_script() -> Self {
         Self {
             header: Header::new(ObjectKind::Function),
             arity: 0,
@@ -127,7 +131,7 @@ impl Function {
         }
     }
 
-    pub fn new_function(name: InternedStr, arity: u8, upvalues: u8) -> Self {
+    pub(in crate::vm) fn new_function(name: InternedStr, arity: u8, upvalues: u8) -> Self {
         Self {
             header: Header::new(ObjectKind::Function),
             arity,
@@ -183,7 +187,7 @@ pub struct NativeFunction {
 }
 
 impl NativeFunction {
-    pub fn new(fun: fn(args: &[Value]) -> Value) -> Self {
+    pub(in crate::vm) fn new(fun: fn(args: &[Value]) -> Value) -> Self {
         Self {
             header: Header::new(ObjectKind::NativeFunction),
             fun,
@@ -206,7 +210,7 @@ pub struct Closure {
 impl Closure {
     /// # Safety
     /// function must point to valid function
-    pub unsafe fn new(function: RawFunction) -> Self {
+    pub(in crate::vm) unsafe fn new(function: RawFunction) -> Self {
         // SAFETY: given function is valid
         let num_upvalues = unsafe { function.as_ref().upvalues() };
         Self {
@@ -241,7 +245,7 @@ pub struct Upvalue {
 }
 
 impl Upvalue {
-    pub fn new_stack(stack_index: usize, next: Option<RawUpvalue>) -> Self {
+    pub(in crate::vm) fn new_stack(stack_index: usize, next: Option<RawUpvalue>) -> Self {
         Self {
             header: Header::new(ObjectKind::Upvalue),
             next,

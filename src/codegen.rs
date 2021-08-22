@@ -8,11 +8,13 @@ use crate::{
         BinOpKind, BlockStmt, Decl, Expr, ForInit, Identifier, Primary, Stmt, UnaryOpKind, VarDecl,
     },
     line_map::LineMap,
-    object::Function,
-    opcode::OpCode,
+    opcode::{Chunk, OpCode},
     table::InternedStr,
     value::Value,
-    vm::Vm,
+    vm::{
+        object::{self, RawFunction},
+        Vm,
+    },
 };
 
 const GLOBAL_BLOCK: usize = 0;
@@ -50,7 +52,7 @@ pub enum FunctionKind {
 
 pub struct Compiler<'parent, 'map> {
     parent: Option<&'parent Compiler<'parent, 'map>>,
-    function: Function,
+    function: RawFunction,
     kind: FunctionKind,
     locals: Vec<Local>,
     upvalues: RefCell<Vec<Upvalue>>,
@@ -71,11 +73,13 @@ fn new_locals() -> Vec<Local> {
     ]
 }
 
+fn mark_nothing() {}
+
 impl<'parent, 'map> Compiler<'parent, 'map> {
-    pub fn new_script(line_map: &'map LineMap) -> Self {
+    pub fn new_script(vm: &mut Vm<'_>, line_map: &'map LineMap) -> Self {
         Self {
             parent: None,
-            function: Function::new_script(),
+            function: vm.allocate_script(mark_nothing),
             kind: FunctionKind::Script,
             locals: new_locals(),
             upvalues: RefCell::new(vec![]),
@@ -87,6 +91,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     }
 
     fn new_function(
+        vm: &mut Vm<'_>,
         parent: &'parent Compiler<'parent, 'map>,
         name: InternedStr,
         arity: u8,
@@ -95,7 +100,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     ) -> Self {
         Self {
             parent: Some(parent),
-            function: Function::new_function(name, arity, 0),
+            function: vm.allocate_function(name, arity, 0, mark_nothing),
             kind: FunctionKind::Function,
             locals: new_locals(),
             upvalues: RefCell::new(vec![]),
@@ -106,9 +111,28 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         }
     }
 
-    /// - Returns `Some((function, upvalues))` if the code contains at least one declaration.
+    fn mark(&self) -> impl FnOnce() + '_ {
+        move || {
+            // SAFETY: self owns the function and must not be deallocated by vm
+            unsafe {
+                object::mark(self.function.cast());
+            }
+        }
+    }
+
+    fn chunk(&self) -> &Chunk {
+        // SAFETY: self owns the function and must not be deallocated by vm
+        unsafe { self.function.as_ref().chunk() }
+    }
+
+    fn chunk_mut(&mut self) -> &mut Chunk {
+        // SAFETY: self owns the function and must not be deallocated by vm
+        unsafe { self.function.as_mut().chunk_mut() }
+    }
+
+    /// - Returns `Some((function, upvalues, error))` if the code contains at least one declaration.
     /// - Returns `None` if the code does not contain any declaration.
-    pub fn finish(mut self) -> Option<(Function, Vec<Upvalue>, Vec<CodegenError>)> {
+    pub fn finish(mut self) -> Option<(RawFunction, Vec<Upvalue>, Vec<CodegenError>)> {
         let return_position = self.return_position?;
         self.gen_return(return_position);
         Some((
@@ -241,7 +265,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             )
         } else {
             let position = ident.start();
-            let ident = vm.objects_mut().allocate_string(ident.to_str().into());
+            let ident = vm.allocate_string(ident.to_str().into(), self.mark());
             let index = self.push_constant(Value::Object(ident.into_raw_obj()), position);
 
             (OpCode::GetGlobal, OpCode::SetGlobal, index)
@@ -250,17 +274,17 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
     fn push_opcode(&mut self, code: OpCode, position: usize) {
         let line = self.line_map.resolve(position);
-        self.function.chunk_mut().push_code(code as u8, line);
+        self.chunk_mut().push_code(code as u8, line);
     }
 
     fn push_u8(&mut self, constant: u8, position: usize) {
         let line = self.line_map.resolve(position);
-        self.function.chunk_mut().push_code(constant, line);
+        self.chunk_mut().push_code(constant, line);
     }
 
     fn push_constant(&mut self, value: Value, position: usize) -> u8 {
-        if self.function.chunk().constants().len() < 256 {
-            self.function.chunk_mut().push_constant(value)
+        if self.chunk().constants().len() < 256 {
+            self.chunk_mut().push_constant(value)
         } else {
             self.errors
                 .get_mut()
@@ -271,16 +295,11 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
     fn allocate_jump_location(&mut self, position: usize) -> usize {
         let line = self.line_map.resolve(position);
-        self.function.chunk_mut().allocate_jump_location(line)
+        self.chunk_mut().allocate_jump_location(line)
     }
 
     fn fill_jump_location(&mut self, jump: usize, ip: usize, position: usize) {
-        if self
-            .function
-            .chunk_mut()
-            .fill_jump_location(jump, ip)
-            .is_err()
-        {
+        if self.chunk_mut().fill_jump_location(jump, ip).is_err() {
             self.errors
                 .get_mut()
                 .push(CodegenError::LoopTooLarge { position })
@@ -289,7 +308,6 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
     fn fill_jump_location_with_current(&mut self, jump: usize, position: usize) {
         if self
-            .function
             .chunk_mut()
             .fill_jump_location_with_current(jump)
             .is_err()
@@ -301,7 +319,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     }
 
     fn current_ip(&self) -> usize {
-        self.function.chunk().code().len()
+        self.chunk().code().len()
     }
 
     fn gen_return(&mut self, position: usize) {
@@ -433,7 +451,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     }
                 }
                 Primary::StringLiteral(s) => {
-                    let obj = vm.objects_mut().allocate_string(s.to_str().into());
+                    let obj = vm.allocate_string(s.to_str().into(), self.mark());
                     let index = self.push_constant(Value::Object(obj.into_raw_obj()), s.start());
                     self.push_opcode(OpCode::Constant, s.start());
                     self.push_u8(index, s.start());
@@ -629,7 +647,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             }
         } else {
             let position = ident.start();
-            let ident = vm.objects_mut().allocate_string(ident.to_str().into());
+            let ident = vm.allocate_string(ident.to_str().into(), self.mark());
             let index = self.push_constant(Value::Object(ident.into_raw_obj()), position);
             let position = gen_value(self, vm);
             self.push_opcode(OpCode::DefineGlobal, position);
@@ -664,7 +682,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             Decl::VarDecl(decl) => self.gen_var_decl(vm, decl),
             Decl::FunDecl(decl) => {
                 let name = decl.ident().unwrap();
-                let name = vm.objects_mut().allocate_string(name.to_str().into());
+                let name = vm.allocate_string(name.to_str().into(), self.mark());
                 let arity = match u8::try_from(decl.params().count()) {
                     Ok(arity) => arity,
                     Err(_) => {
@@ -681,6 +699,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     decl.ident().unwrap(),
                     move |this, vm| {
                         let mut compiler = Compiler::new_function(
+                            vm,
                             this,
                             name,
                             arity,
@@ -694,12 +713,15 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         }
                         compiler.gen_block_stmt(vm, decl.body().unwrap(), false);
                         compiler.end_block(decl.start());
-                        let (mut function, upvalues, errors) = compiler.finish().unwrap();
-                        *function.upvalues_mut() = u8::try_from(upvalues.len()).unwrap_or(255);
+                        let (mut fun_obj, upvalues, errors) = compiler.finish().unwrap();
+                        // the function is valid
+                        unsafe {
+                            *fun_obj.as_mut().upvalues_mut() =
+                                u8::try_from(upvalues.len()).unwrap_or(255);
+                        }
                         this.errors.get_mut().extend(errors);
-                        let fun_obj = vm.objects_mut().allocate_function(function);
 
-                        let index = this.push_constant(Value::Object(fun_obj), decl.start());
+                        let index = this.push_constant(Value::Object(fun_obj.cast()), decl.start());
                         this.push_opcode(OpCode::Closure, decl.start());
                         this.push_u8(index, decl.start());
 

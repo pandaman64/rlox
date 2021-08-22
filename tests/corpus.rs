@@ -15,3 +15,30 @@ fn test_corpus() {
 
 // TODO: miri test
 // replace interpreter with `cargo +nightly miri run` and disable isolation
+#[test]
+#[ignore = "running Miri is tooooooooo slow"]
+fn test_corpus_miri() {
+    let success = Command::new("dart")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("MIRIFLAGS", "-Zmiri-disable-isolation")
+        .args([
+            "tool/bin/test.dart",
+            TEST,
+            "-i",
+            "cargo",
+            "-a",
+            "+nightly",
+            "-a",
+            "miri",
+            "-a",
+            "run",
+            "-a",
+            "--quiet",
+            "-a",
+            "--",
+        ])
+        .status()
+        .expect("failed to run dart test.dart with miri")
+        .success();
+    assert!(success);
+}

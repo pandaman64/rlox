@@ -3,7 +3,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use crate::object::{RawObject, RawStr};
+use crate::vm::object::{RawObject, RawStr};
 
 #[derive(Clone, Copy)]
 pub struct InternedStr(RawStr);
@@ -53,12 +53,16 @@ impl InternedStr {
 }
 
 // interned keys that can be compared with pointer values
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Key(RawStr);
 
 impl Key {
     pub fn new(s: InternedStr) -> Self {
         Self(s.0)
+    }
+
+    pub fn into_raw_obj(self) -> RawObject {
+        self.0.cast()
     }
 
     pub fn display(&self) -> impl fmt::Display + '_ {
