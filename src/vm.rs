@@ -361,6 +361,44 @@ impl Objects {
                 }
             }
         }
+        fn sweep(head: &mut Option<RawObject>) {
+            unsafe {
+                let mut prev = None;
+                let mut current = *head;
+
+                while let Some(obj) = current {
+                    let marked_ptr = ptr::addr_of_mut!((*obj.as_ptr()).marked);
+                    if ptr::read(marked_ptr) {
+                        ptr::write(marked_ptr, false);
+                        let next_ptr = ptr::addr_of!((*obj.as_ptr()).next);
+                        prev = Some(obj);
+                        current = ptr::read(next_ptr);
+                    } else {
+                        let unreachable_obj = obj;
+                        let next_ptr = ptr::addr_of!((*obj.as_ptr()).next);
+                        current = ptr::read(next_ptr);
+
+                        if let Some(prev) = prev {
+                            let next_ptr = ptr::addr_of_mut!((*prev.as_ptr()).next);
+                            ptr::write(next_ptr, current);
+                        } else {
+                            *head = current;
+                        }
+
+                        free_object(unreachable_obj);
+                    }
+                }
+            }
+        }
+        fn remove_white_interned_string(strings: &mut HashSet<InternedStr>) {
+            // the strings table holds a weak pointer. in other words, if an interned string is
+            // white (not marked), we remove it from the strings table and later collect it.
+            strings.retain(|s| unsafe {
+                let obj = s.into_raw_obj();
+                let marked_ptr = ptr::addr_of!((*obj.as_ptr()).marked);
+                ptr::read(marked_ptr)
+            })
+        }
 
         let log = log_gc();
         if log {
@@ -377,6 +415,8 @@ impl Objects {
         mark_compiler_roots(&mut worklist);
 
         trace_references(&mut worklist);
+        remove_white_interned_string(&mut self.strings);
+        sweep(&mut self.objects_head);
 
         if log {
             eprintln!("-- gc end");
@@ -542,6 +582,14 @@ impl<'w> Vm<'w> {
 
         // un-register objects
         self.stack.pop();
+        self.stack.pop();
+    }
+
+    pub fn push(&mut self, value: Value) {
+        self.stack.push(value);
+    }
+
+    pub fn pop(&mut self) {
         self.stack.pop();
     }
 

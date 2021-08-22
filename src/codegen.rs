@@ -694,6 +694,9 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     }
                 };
 
+                // register name as GC root
+                vm.push(Value::Object(name.into_raw_obj()));
+
                 self.define_variable(
                     vm,
                     decl.ident().unwrap(),
@@ -737,6 +740,9 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     // only after the initialization.
                     true,
                 );
+
+                // remove name from GC root
+                vm.pop();
             }
             Decl::Stmt(stmt) => self.gen_stmt(vm, stmt),
         }
