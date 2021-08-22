@@ -36,6 +36,7 @@ fn test_stress_gc() {
 
 print f();
 // expect: i"#;
+    std::env::set_var("RLOX_LOG_GC", "1");
     std::env::set_var("RLOX_STRESS_GC", "1");
     let mut output = vec![];
     run(input, &mut output).unwrap();

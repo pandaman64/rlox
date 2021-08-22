@@ -64,6 +64,9 @@ const MAX_CALL_FRAME: usize = 65536;
 #[cfg(miri)]
 const MAX_CALL_FRAME: usize = 100;
 
+const GC_HEAP_GLOW_FACTOR: usize = 2;
+const GC_INITIAL_HEAP: usize = 1024 * 1024;
+
 struct CallFrame {
     closure: RawClosure,
     // the ip for this function
@@ -87,6 +90,9 @@ struct Objects {
     open_upvalues_head: Option<RawUpvalue>,
     strings: HashSet<InternedStr>,
     globals: HashMap<Key, Value>,
+    // in bytes
+    allocated: usize,
+    next_gc: usize,
 }
 
 impl Objects {
@@ -96,6 +102,8 @@ impl Objects {
             open_upvalues_head: None,
             strings: HashSet::new(),
             globals: HashMap::new(),
+            allocated: 0,
+            next_gc: GC_INITIAL_HEAP,
         }
     }
 
@@ -106,15 +114,19 @@ impl Objects {
         frames: &[CallFrame],
         mark_compiler_roots: F,
     ) -> RawObject {
-        if stress_gc() {
+        let size = size_of::<T>();
+        self.allocated += size;
+
+        if stress_gc() || self.allocated > self.next_gc {
             self.collect_garbage(stack, frames, mark_compiler_roots);
         }
+
         let obj_ptr = Box::into_raw(Box::new(obj));
         if log_gc() {
             eprintln!(
                 "-- gc: {:?} allocate {:4} bytes for {}",
                 obj_ptr,
-                size_of::<T>(),
+                size,
                 type_name::<T>()
             );
         }
@@ -137,6 +149,47 @@ impl Objects {
     }
 
     /// # Safety
+    /// obj must be valid and allocated by allocate_object
+    unsafe fn free_object(&mut self, obj: RawObject) -> Option<RawObject> {
+        let log = log_gc();
+        unsafe {
+            // SAFETY:
+            // since we carefully avoid using references in this implementation, all pointers
+            // declared here should share the same permission for accessing the object `obj`
+            // points to. moreover, obj_ptr should have the right provenance for the whole
+            // object, not only for the header.
+            let obj_ptr = obj.as_ptr();
+            let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
+            let next_ptr = ptr::addr_of_mut!((*obj_ptr).next);
+            let next = ptr::read(next_ptr);
+
+            // SAFETY:
+            // we assume that runtime type of the values are correct, so that we can cast back
+            // to the original types and deallocate them here.
+            macro_rules! free {
+                ($ptr:expr, $ty:ident) => {{
+                    self.allocated -= std::mem::size_of::<object::$ty>();
+
+                    let ptr = $ptr as *mut object::$ty;
+                    if log {
+                        eprintln!("-- gc: {:?} free type {}", ptr, stringify!($ty));
+                    }
+                    drop(Box::from_raw(ptr));
+                }};
+            }
+            match ptr::read(kind_ptr) {
+                ObjectKind::Str => free!(obj_ptr, Str),
+                ObjectKind::Function => free!(obj_ptr, Function),
+                ObjectKind::NativeFunction => free!(obj_ptr, NativeFunction),
+                ObjectKind::Closure => free!(obj_ptr, Closure),
+                ObjectKind::Upvalue => free!(obj_ptr, Upvalue),
+            }
+
+            next
+        }
+    }
+
+    /// # Safety
     /// no chunks referring to objects managed by this vm can be run after calling free_objects
     unsafe fn free_all_objects(&mut self) {
         self.strings.clear();
@@ -146,7 +199,7 @@ impl Objects {
             // SAFETY: self.objects points to an initialized object and covers the whole allocation
             // in an type-safe manner. this property must be guaranteed by allocation methods.
             unsafe {
-                self.objects_head = free_object(obj);
+                self.objects_head = self.free_object(obj);
             }
         }
     }
@@ -173,9 +226,10 @@ impl Objects {
                     str_ptr
                 }
                 Some(interned) => {
+                    let interned = *interned;
                     // free the constructed string since we return from the strings table
-                    free_object(str_ptr.into_raw_obj());
-                    *interned
+                    self.free_object(str_ptr.into_raw_obj());
+                    interned
                 }
             }
         }
@@ -361,10 +415,10 @@ impl Objects {
                 }
             }
         }
-        fn sweep(head: &mut Option<RawObject>) {
+        fn sweep(this: &mut Objects) {
             unsafe {
                 let mut prev = None;
-                let mut current = *head;
+                let mut current = this.objects_head;
 
                 while let Some(obj) = current {
                     let marked_ptr = ptr::addr_of_mut!((*obj.as_ptr()).marked);
@@ -382,10 +436,10 @@ impl Objects {
                             let next_ptr = ptr::addr_of_mut!((*prev.as_ptr()).next);
                             ptr::write(next_ptr, current);
                         } else {
-                            *head = current;
+                            this.objects_head = current;
                         }
 
-                        free_object(unreachable_obj);
+                        this.free_object(unreachable_obj);
                     }
                 }
             }
@@ -400,6 +454,7 @@ impl Objects {
             })
         }
 
+        let before = self.allocated;
         let log = log_gc();
         if log {
             eprintln!("-- gc begin");
@@ -416,10 +471,19 @@ impl Objects {
 
         trace_references(&mut worklist);
         remove_white_interned_string(&mut self.strings);
-        sweep(&mut self.objects_head);
+        sweep(self);
+
+        self.next_gc = self.allocated * GC_HEAP_GLOW_FACTOR;
 
         if log {
             eprintln!("-- gc end");
+            eprintln!(
+                "   collected {:4} bytes (from {:4} to {:4}) next at {:4}",
+                before - self.allocated,
+                before,
+                self.allocated,
+                self.next_gc
+            );
         }
     }
 }
@@ -461,45 +525,6 @@ fn extract_constant_key(ip: &mut usize, chunk: &Chunk) -> Option<Key> {
             }
         }
         _ => None,
-    }
-}
-
-/// # Safety
-/// obj must be valid and allocated by allocate_object
-unsafe fn free_object(obj: RawObject) -> Option<RawObject> {
-    let log = log_gc();
-    unsafe {
-        // SAFETY:
-        // since we carefully avoid using references in this implementation, all pointers
-        // declared here should share the same permission for accessing the object `obj`
-        // points to. moreover, obj_ptr should have the right provenance for the whole
-        // object, not only for the header.
-        let obj_ptr = obj.as_ptr();
-        let kind_ptr = ptr::addr_of_mut!((*obj_ptr).kind);
-        let next_ptr = ptr::addr_of_mut!((*obj_ptr).next);
-        let next = ptr::read(next_ptr);
-
-        // SAFETY:
-        // we assume that runtime type of the values are correct, so that we can cast back
-        // to the original types and deallocate them here.
-        macro_rules! free {
-            ($ptr:expr, $ty:ident) => {{
-                let ptr = $ptr as *mut object::$ty;
-                if log {
-                    eprintln!("-- gc: {:?} free type {}", ptr, stringify!($ty));
-                }
-                drop(Box::from_raw(ptr));
-            }};
-        }
-        match ptr::read(kind_ptr) {
-            ObjectKind::Str => free!(obj_ptr, Str),
-            ObjectKind::Function => free!(obj_ptr, Function),
-            ObjectKind::NativeFunction => free!(obj_ptr, NativeFunction),
-            ObjectKind::Closure => free!(obj_ptr, Closure),
-            ObjectKind::Upvalue => free!(obj_ptr, Upvalue),
-        }
-
-        next
     }
 }
 
