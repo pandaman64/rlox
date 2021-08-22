@@ -100,7 +100,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     ) -> Self {
         Self {
             parent: Some(parent),
-            function: vm.allocate_function(name, arity, 0, mark_nothing),
+            function: vm.allocate_function(name, arity, 0, parent.mark()),
             kind: FunctionKind::Function,
             locals: new_locals(),
             upvalues: RefCell::new(vec![]),
@@ -116,6 +116,9 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             // SAFETY: self owns the function and must not be deallocated by vm
             unsafe {
                 object::mark(self.function.cast(), worklist);
+            }
+            if let Some(parent) = self.parent {
+                parent.mark()(worklist);
             }
         }
     }

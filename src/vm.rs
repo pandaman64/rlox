@@ -590,8 +590,8 @@ impl<'w> Vm<'w> {
         self.stack.push(value);
     }
 
-    pub fn pop(&mut self) {
-        self.stack.pop();
+    pub fn pop(&mut self) -> Option<Value> {
+        self.stack.pop()
     }
 
     /// # Safety

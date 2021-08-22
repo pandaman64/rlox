@@ -13,6 +13,18 @@ fn test_corpus() {
     assert!(success);
 }
 
+#[test]
+fn test_corpus_stress_gc() {
+    let success = Command::new("dart")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("RLOX_STRESS_GC", "1")
+        .args(["tool/bin/test.dart", TEST, "-i", "target/debug/rlox"])
+        .status()
+        .expect("failed to run dart test.dart")
+        .success();
+    assert!(success);
+}
+
 // TODO: miri test
 // replace interpreter with `cargo +nightly miri run` and disable isolation
 #[test]
