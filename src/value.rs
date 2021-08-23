@@ -1,5 +1,4 @@
 use core::fmt;
-use std::ptr;
 
 use crate::vm::object::{self, ObjectRef, RawObject};
 
@@ -92,19 +91,7 @@ impl Value {
             (Nil, Nil) => true,
             (Bool(b1), Bool(b2)) => b1 == b2,
             (Number(n1), Number(n2)) => n1 == n2,
-            (Object(o1), Object(o2)) => {
-                // TODO: we can probably just compare pointers without looking at the header
-                // SAFETY: these objects are valid
-                match unsafe { (object::as_ref(*o1), object::as_ref(*o2)) } {
-                    // strings are interned
-                    (ObjectRef::Str(_), ObjectRef::Str(_)) => ptr::eq(o1.as_ptr(), o2.as_ptr()),
-                    // functions are equal iff they point to the same function object
-                    (ObjectRef::Function(_), ObjectRef::Function(_)) => {
-                        ptr::eq(o1.as_ptr(), o2.as_ptr())
-                    }
-                    _ => false,
-                }
-            }
+            (Object(o1), Object(o2)) => o1 == o2,
             _ => false,
         }
     }
