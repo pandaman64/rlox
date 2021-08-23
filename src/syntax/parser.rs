@@ -180,7 +180,13 @@ where
         use SyntaxKind::*;
 
         let checkpoint = match self.peek() {
-            None => return,
+            None => {
+                self.errors.push(SyntaxError::ExpectNode {
+                    name: "expression",
+                    position: self.position,
+                });
+                return;
+            }
             Some(token) => {
                 self.builder.start_node(ExprNode.into());
                 let checkpoint = self.builder.checkpoint();

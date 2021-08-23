@@ -105,7 +105,7 @@ pub fn print_syntax_error(error: &SyntaxError, root: &SyntaxNode, line_map: &Lin
             let line = line_map.resolve(*position);
             eprintln!("[line {}] Error: Unexpected character.", line);
         }
-        _ => {
+        _error => {
             // TODO: adjust error message
             // eprintln!("{:?}", error);
         }

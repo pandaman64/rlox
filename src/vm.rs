@@ -1043,6 +1043,86 @@ impl<'w> Vm<'w> {
                         }
                     }
                 }
+                Some(GetProperty) => {
+                    let name = match extract_constant_key(&mut frame.ip, chunk) {
+                        Some(key) => key,
+                        None => {
+                            eprintln!("OP_GET_PROPERTY takes a string constant");
+                            return InterpretResult::CompileError;
+                        }
+                    };
+                    // SAFETY: values in the stack are valid
+                    unsafe {
+                        let instance: RawInstance = match self.stack.last() {
+                            Some(value) => match value {
+                                Value::Object(obj)
+                                    if matches!(object::as_ref(*obj), ObjectRef::Instance(_)) =>
+                                {
+                                    obj.cast()
+                                }
+                                _ => {
+                                    eprintln!("Only instances have properties.");
+                                    return InterpretResult::RuntimeError;
+                                }
+                            },
+                            None => {
+                                eprintln!("not enough stack for OP_GET_PROPERTY");
+                                return InterpretResult::RuntimeError;
+                            }
+                        };
+
+                        if let Some(value) = instance.as_ref().fields().get(&name) {
+                            let value = value.clone();
+                            // pop the instance
+                            self.stack.pop();
+                            self.stack.push(value);
+                        } else {
+                            eprintln!("Undefined property '{}'.", name.display());
+                            return InterpretResult::RuntimeError;
+                        }
+                    }
+                }
+                Some(SetProperty) => {
+                    let name = match extract_constant_key(&mut frame.ip, chunk) {
+                        Some(key) => key,
+                        None => {
+                            eprintln!("OP_SET_PROPERTY takes a string constant");
+                            return InterpretResult::CompileError;
+                        }
+                    };
+                    let len = self.stack.len();
+                    if len < 2 {
+                        eprintln!("insufficient stack for OP_SET_PROPERTY");
+                        return InterpretResult::CompileError;
+                    }
+                    match &mut self.stack[len - 2..] {
+                        [instance, value] => {
+                            // SAFETY: values in the stack are valid
+                            unsafe {
+                                let mut instance: RawInstance = match instance {
+                                    Value::Object(obj)
+                                        if matches!(
+                                            object::as_ref(*obj),
+                                            ObjectRef::Instance(_)
+                                        ) =>
+                                    {
+                                        obj.cast()
+                                    }
+                                    _ => {
+                                        eprintln!("Only instances have fields.");
+                                        return InterpretResult::RuntimeError;
+                                    }
+                                };
+                                instance.as_mut().fields_mut().insert(name, value.clone());
+
+                                let value = self.stack.pop().unwrap();
+                                self.stack.pop();
+                                self.stack.push(value);
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                }
                 Some(Pop) => match self.stack.pop() {
                     None => {
                         eprintln!("no stack");

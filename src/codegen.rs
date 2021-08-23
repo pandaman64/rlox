@@ -331,6 +331,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     }
 
     fn gen_place(&mut self, vm: &mut Vm<'_>, expr: Expr) -> (bool, Identifier) {
+        // the left hand side of assignments is guaranteed to be a valid place by the parser
         match expr {
             Expr::Primary(Primary::Identifier(ident)) => (false, ident),
             Expr::BinOp(expr) if expr.kind() == BinOpKind::Dot => {
@@ -370,13 +371,37 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         let rhs = operands.next().unwrap();
                         let (has_target, ident) = self.gen_place(vm, lhs);
                         if has_target {
-                            todo!()
+                            self.gen_expr(vm, rhs);
+
+                            let ident = vm.allocate_string(ident.to_str().into(), self.mark());
+                            let index = self
+                                .push_constant(Value::Object(ident.into_raw_obj()), expr.start());
+                            self.push_opcode(OpCode::SetProperty, expr.start());
+                            self.push_u8(index, expr.start());
                         } else {
                             let (_get_op, set_op, index) = self.resolve(vm, ident);
                             self.gen_expr(vm, rhs);
                             self.push_opcode(set_op, expr.start());
                             self.push_u8(index, expr.start());
                         }
+                        return;
+                    }
+                    BinOpKind::Dot => {
+                        let mut operands = expr.operands();
+                        let lhs = operands.next().unwrap();
+                        let rhs = operands.next().unwrap();
+
+                        let ident = match rhs {
+                            Expr::Primary(Primary::Identifier(ident)) => ident,
+                            // need to introduce opcode for dynamically selecting a field from an instance
+                            _ => todo!("expect identifier after dot"),
+                        };
+                        self.gen_expr(vm, lhs);
+                        let ident = vm.allocate_string(ident.to_str().into(), self.mark());
+                        let index =
+                            self.push_constant(Value::Object(ident.into_raw_obj()), expr.start());
+                        self.push_opcode(OpCode::GetProperty, expr.start());
+                        self.push_u8(index, expr.start());
                         return;
                     }
                     BinOpKind::Or => {
@@ -427,7 +452,6 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     BinOpKind::Subtract => &[OpCode::Subtract],
                     BinOpKind::Multiply => &[OpCode::Multiply],
                     BinOpKind::Divide => &[OpCode::Divide],
-                    BinOpKind::Dot => todo!(),
                 };
                 for operand in expr.operands() {
                     self.gen_expr(vm, operand);

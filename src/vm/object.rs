@@ -396,4 +396,12 @@ impl Instance {
     pub fn class(&self) -> RawClass {
         self.class
     }
+
+    pub fn fields(&self) -> &HashMap<Key, Value> {
+        &self.fields
+    }
+
+    pub fn fields_mut(&mut self) -> &mut HashMap<Key, Value> {
+        &mut self.fields
+    }
 }

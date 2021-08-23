@@ -38,6 +38,8 @@ pub enum OpCode {
     SetLocal,
     GetUpvalue,
     SetUpvalue,
+    GetProperty,
+    SetProperty,
     Jump,
     JumpIfFalse,
     Call,
@@ -180,6 +182,14 @@ impl Chunk {
             Some(SetLocal) => trace_byte_code(self, offset, "OP_SET_LOCAL"),
             Some(GetUpvalue) => trace_byte_code(self, offset, "OP_GET_UPVALUE"),
             Some(SetUpvalue) => trace_byte_code(self, offset, "OP_SET_UPVALUE"),
+            Some(GetProperty) => {
+                // SAFETY: constants in this chunk are valid
+                unsafe { trace_constant_code(self, offset, "OP_GET_PROPERTY") }
+            }
+            Some(SetProperty) => {
+                // SAFETY: constants in this chunk are valid
+                unsafe { trace_constant_code(self, offset, "OP_SET_PROPERTY") }
+            }
             Some(Jump) => trace_jump_code(self, offset, "OP_JUMP"),
             Some(JumpIfFalse) => trace_jump_code(self, offset, "OP_JUMP_IF_FALSE"),
             Some(Call) => trace_byte_code(self, offset, "OP_CALL"),

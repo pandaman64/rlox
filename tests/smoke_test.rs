@@ -55,3 +55,11 @@ fn test_class_decl() {
     run(input, &mut output).unwrap();
     assert_eq!(output, b"Brioche\nBrioche instance\n");
 }
+
+#[test]
+fn test_assignment() {
+    let input = r#"a + (b.c = 100);"#;
+    std::env::set_var("RUST_LOG", "trace");
+    let mut output = vec![];
+    assert!(run(input, &mut output).is_err());
+}
