@@ -1,12 +1,9 @@
-use std::{
-    collections::HashMap,
-    ptr::{self, NonNull},
-};
+use std::ptr::{self, NonNull};
 
 use crate::{
     log_gc,
     opcode::Chunk,
-    table::{InternedStr, Key},
+    table::{InternedStr, Table},
     value::{self, Value},
 };
 
@@ -381,7 +378,7 @@ impl Class {
 pub struct Instance {
     header: Header,
     class: RawClass,
-    fields: HashMap<Key, Value>,
+    fields: Table,
 }
 
 impl Instance {
@@ -389,7 +386,7 @@ impl Instance {
         Self {
             header: Header::new(ObjectKind::Instance),
             class,
-            fields: HashMap::new(),
+            fields: Table::new(),
         }
     }
 
@@ -397,11 +394,11 @@ impl Instance {
         self.class
     }
 
-    pub fn fields(&self) -> &HashMap<Key, Value> {
+    pub fn fields(&self) -> &Table {
         &self.fields
     }
 
-    pub fn fields_mut(&mut self) -> &mut HashMap<Key, Value> {
+    pub fn fields_mut(&mut self) -> &mut Table {
         &mut self.fields
     }
 }

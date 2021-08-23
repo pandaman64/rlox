@@ -1,6 +1,6 @@
 use std::{
     any::type_name,
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fmt,
     io::{self, Write},
     mem::size_of,
@@ -12,7 +12,7 @@ use crate::{
     log_gc,
     opcode::{Chunk, OpCode},
     stress_gc,
-    table::{InternedStr, Key},
+    table::{InternedStr, Key, Table},
     trace_available,
     value::Value,
 };
@@ -89,7 +89,7 @@ struct Objects {
     objects_head: Option<RawObject>,
     open_upvalues_head: Option<RawUpvalue>,
     strings: HashSet<InternedStr>,
-    globals: HashMap<Key, Value>,
+    globals: Table,
     // in bytes
     allocated: usize,
     next_gc: usize,
@@ -101,7 +101,7 @@ impl Objects {
             objects_head: None,
             open_upvalues_head: None,
             strings: HashSet::new(),
-            globals: HashMap::new(),
+            globals: Table::new(),
             allocated: 0,
             next_gc: GC_INITIAL_HEAP,
         }
@@ -407,7 +407,7 @@ impl Objects {
                 }
             }
         }
-        fn mark_table(table: &HashMap<Key, Value>, worklist: &mut Vec<RawObject>) {
+        fn mark_table(table: &Table, worklist: &mut Vec<RawObject>) {
             for (key, value) in table.iter() {
                 let key = key.into_raw_obj();
                 unsafe {
@@ -639,9 +639,11 @@ impl<'w> Vm<'w> {
         // register fun as GC roots
         self.stack.push(Value::Object(fun_obj));
 
-        self.objects
-            .globals
-            .insert(Key::new(name), Value::Object(fun_obj));
+        self.objects.globals.insert(
+            &mut self.objects.allocated,
+            Key::new(name),
+            Value::Object(fun_obj),
+        );
 
         // un-register objects
         self.stack.pop();
@@ -938,7 +940,9 @@ impl<'w> Vm<'w> {
                             return InterpretResult::RuntimeError;
                         }
                         Some(value) => {
-                            objects.globals.insert(key, value.clone());
+                            objects
+                                .globals
+                                .insert(&mut objects.allocated, key, value.clone());
                         }
                     }
                     // we pop the value after inserting to globals table so that we can run GC
@@ -954,7 +958,7 @@ impl<'w> Vm<'w> {
                             return InterpretResult::CompileError;
                         }
                     };
-                    let value = match objects.globals.get(&key) {
+                    let value = match objects.globals.get(key) {
                         Some(value) => value,
                         None => {
                             eprintln!("Undefined variable '{}'.", key.display());
@@ -977,15 +981,20 @@ impl<'w> Vm<'w> {
                             eprintln!("no stack for OP_SET_GLOBAL");
                             return InterpretResult::RuntimeError;
                         }
-                        Some(value) => match objects.globals.entry(key) {
-                            Entry::Vacant(v) => {
-                                eprintln!("Undefined variable '{}'.", v.key().display());
-                                return InterpretResult::RuntimeError;
+                        Some(value) => {
+                            let old_cap = objects.globals.capacity();
+                            match objects.globals.entry(key) {
+                                Entry::Vacant(v) => {
+                                    eprintln!("Undefined variable '{}'.", v.key().display());
+                                    return InterpretResult::RuntimeError;
+                                }
+                                Entry::Occupied(mut o) => {
+                                    o.insert(value.clone());
+                                }
                             }
-                            Entry::Occupied(mut o) => {
-                                o.insert(value.clone());
-                            }
-                        },
+                            let new_cap = objects.globals.capacity();
+                            objects.allocated += new_cap - old_cap;
+                        }
                     }
                 }
                 Some(GetLocal) => {
@@ -1071,7 +1080,7 @@ impl<'w> Vm<'w> {
                             }
                         };
 
-                        if let Some(value) = instance.as_ref().fields().get(&name) {
+                        if let Some(value) = instance.as_ref().fields().get(name) {
                             let value = value.clone();
                             // pop the instance
                             self.stack.pop();
@@ -1113,7 +1122,11 @@ impl<'w> Vm<'w> {
                                         return InterpretResult::RuntimeError;
                                     }
                                 };
-                                instance.as_mut().fields_mut().insert(name, value.clone());
+                                instance.as_mut().fields_mut().insert(
+                                    &mut objects.allocated,
+                                    name,
+                                    value.clone(),
+                                );
 
                                 let value = self.stack.pop().unwrap();
                                 self.stack.pop();

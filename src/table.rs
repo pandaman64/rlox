@@ -1,9 +1,13 @@
 use std::{
+    collections::{hash_map::Entry, HashMap},
     fmt,
     hash::{Hash, Hasher},
 };
 
-use crate::vm::object::{RawObject, RawStr};
+use crate::{
+    value::Value,
+    vm::object::{RawObject, RawStr},
+};
 
 #[derive(Clone, Copy)]
 pub struct InternedStr(RawStr);
@@ -68,5 +72,51 @@ impl Key {
     pub fn display(&self) -> impl fmt::Display + '_ {
         // SAFETY: the construction of InternedStr guarantees the validity
         unsafe { self.0.as_ref().as_rust_str() }
+    }
+}
+
+#[repr(transparent)]
+pub struct Table {
+    map: HashMap<Key, Value>,
+}
+
+impl Default for Table {
+    fn default() -> Self {
+        Self {
+            map: HashMap::with_capacity(0),
+        }
+    }
+}
+
+impl Table {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.map.capacity()
+    }
+
+    pub fn get(&self, key: Key) -> Option<Value> {
+        self.map.get(&key).cloned()
+    }
+
+    pub fn insert(&mut self, allocated: &mut usize, key: Key, value: Value) {
+        let old_cap = self.map.capacity();
+        self.map.insert(key, value);
+        *allocated += self.map.capacity() - old_cap;
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Key, &Value)> {
+        self.map.iter()
+    }
+
+    // clear does not change capacity
+    pub fn clear(&mut self) {
+        self.map.clear();
+    }
+
+    pub fn entry(&mut self, key: Key) -> Entry<'_, Key, Value> {
+        self.map.entry(key)
     }
 }
