@@ -15,6 +15,7 @@ use crate::{
     table::{InternedStr, Key, Table},
     trace_available,
     value::Value,
+    HeapSize,
 };
 use num::FromPrimitive as _;
 use object::{
@@ -107,14 +108,14 @@ impl Objects {
         }
     }
 
-    fn allocate_object<T, F: FnOnce(&mut Vec<RawObject>)>(
+    fn allocate_object<T: HeapSize, F: FnOnce(&mut Vec<RawObject>)>(
         &mut self,
         obj: T,
         stack: &[Value],
         frames: &[CallFrame],
         mark_compiler_roots: F,
     ) -> RawObject {
-        let size = size_of::<T>();
+        let size = size_of::<T>() + obj.heap_size();
         self.allocated += size;
 
         if stress_gc() || self.allocated > self.next_gc {
@@ -168,12 +169,20 @@ impl Objects {
             // to the original types and deallocate them here.
             macro_rules! free {
                 ($ptr:expr, $ty:ident) => {{
-                    self.allocated -= std::mem::size_of::<object::$ty>();
-
                     let ptr = $ptr as *mut object::$ty;
+                    let size =
+                        std::mem::size_of::<object::$ty>() + ptr.as_ref().unwrap().heap_size();
+
                     if log {
-                        eprintln!("-- gc: {:?} free type {}", ptr, stringify!($ty));
+                        eprintln!(
+                            "-- gc: {:?}     free {:4} bytes of type {}",
+                            ptr,
+                            size,
+                            stringify!($ty)
+                        );
                     }
+
+                    self.allocated -= size;
                     drop(Box::from_raw(ptr));
                 }};
             }
@@ -389,6 +398,21 @@ impl Objects {
                 head.close(value);
                 self.open_upvalues_head = head.next();
             }
+        }
+    }
+
+    /// # Safety
+    /// function and chunk must be valid
+    unsafe fn set_chunk(&mut self, mut function: RawFunction, chunk: Chunk) {
+        // SAFETY: function is valid
+        unsafe {
+            let function = function.as_mut();
+            let original_size = function.heap_size();
+            function.set_chunk(chunk);
+            let new_size = function.heap_size();
+
+            self.allocated -= original_size;
+            self.allocated += new_size;
         }
     }
 
@@ -608,6 +632,15 @@ impl<'w> Vm<'w> {
         let instance = Instance::new(class);
         self.objects
             .allocate_instance(instance, &self.stack, &self.frames)
+    }
+
+    /// # Safety
+    /// function and chunk must be valid
+    pub unsafe fn set_chunk(&mut self, function: RawFunction, chunk: Chunk) {
+        // SAFETY: function and chunk are valid
+        unsafe {
+            self.objects.set_chunk(function, chunk);
+        }
     }
 
     /// # Safety
@@ -983,7 +1016,7 @@ impl<'w> Vm<'w> {
                             return InterpretResult::RuntimeError;
                         }
                         Some(value) => {
-                            let old_cap = objects.globals.capacity();
+                            let old_size = objects.globals.heap_size();
                             match objects.globals.entry(key) {
                                 Entry::Vacant(v) => {
                                     eprintln!("Undefined variable '{}'.", v.key().display());
@@ -993,8 +1026,8 @@ impl<'w> Vm<'w> {
                                     o.insert(value.clone());
                                 }
                             }
-                            let new_cap = objects.globals.capacity();
-                            objects.allocated += new_cap - old_cap;
+                            let new_size = objects.globals.heap_size();
+                            objects.allocated += new_size - old_size;
                         }
                     }
                 }

@@ -5,6 +5,7 @@ use crate::{
     opcode::Chunk,
     table::{InternedStr, Table},
     value::{self, Value},
+    HeapSize,
 };
 
 // the pointer must have valid provenance not only for the header but the whole object
@@ -173,6 +174,12 @@ pub struct Str {
     content: String,
 }
 
+impl HeapSize for Str {
+    fn heap_size(&self) -> usize {
+        self.content.heap_size()
+    }
+}
+
 impl Str {
     pub(in crate::vm) fn new(content: String) -> Self {
         Self {
@@ -193,6 +200,12 @@ pub struct Function {
     upvalues: u8,
     chunk: Chunk,
     name: Option<InternedStr>,
+}
+
+impl HeapSize for Function {
+    fn heap_size(&self) -> usize {
+        self.chunk.heap_size()
+    }
 }
 
 impl Function {
@@ -216,7 +229,7 @@ impl Function {
         }
     }
 
-    pub fn set_chunk(&mut self, chunk: Chunk) {
+    pub(in crate::vm) fn set_chunk(&mut self, chunk: Chunk) {
         self.chunk = chunk;
     }
 
@@ -257,6 +270,12 @@ pub struct NativeFunction {
     fun: fn(args: &[Value]) -> Value,
 }
 
+impl HeapSize for NativeFunction {
+    fn heap_size(&self) -> usize {
+        0
+    }
+}
+
 impl NativeFunction {
     pub(in crate::vm) fn new(fun: fn(args: &[Value]) -> Value) -> Self {
         Self {
@@ -275,7 +294,13 @@ pub struct Closure {
     header: Header,
     // This must point to a Function
     function: RawFunction,
-    upvalues: Vec<Option<RawUpvalue>>,
+    upvalues: Box<[Option<RawUpvalue>]>,
+}
+
+impl HeapSize for Closure {
+    fn heap_size(&self) -> usize {
+        self.upvalues.heap_size()
+    }
 }
 
 impl Closure {
@@ -287,7 +312,7 @@ impl Closure {
         Self {
             header: Header::new(ObjectKind::Closure),
             function,
-            upvalues: vec![None; usize::from(num_upvalues)],
+            upvalues: vec![None; usize::from(num_upvalues)].into_boxed_slice(),
         }
     }
 
@@ -295,11 +320,11 @@ impl Closure {
         self.function
     }
 
-    pub fn upvalues(&self) -> &Vec<Option<RawUpvalue>> {
+    pub fn upvalues(&self) -> &[Option<RawUpvalue>] {
         &self.upvalues
     }
 
-    pub fn upvalues_mut(&mut self) -> &mut Vec<Option<RawUpvalue>> {
+    pub fn upvalues_mut(&mut self) -> &mut [Option<RawUpvalue>] {
         &mut self.upvalues
     }
 }
@@ -313,6 +338,12 @@ pub struct Upvalue {
     stack_index: usize,
     // when stack_index == usize::MAX, the variable is stored inline
     closed_value: Value,
+}
+
+impl HeapSize for Upvalue {
+    fn heap_size(&self) -> usize {
+        0
+    }
 }
 
 impl Upvalue {
@@ -357,6 +388,12 @@ pub struct Class {
     name: InternedStr,
 }
 
+impl HeapSize for Class {
+    fn heap_size(&self) -> usize {
+        0
+    }
+}
+
 impl Class {
     pub(in crate::vm) fn new(name: InternedStr) -> Self {
         Self {
@@ -375,6 +412,12 @@ pub struct Instance {
     header: Header,
     class: RawClass,
     fields: Table,
+}
+
+impl HeapSize for Instance {
+    fn heap_size(&self) -> usize {
+        self.fields.heap_size()
+    }
 }
 
 impl Instance {

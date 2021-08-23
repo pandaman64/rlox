@@ -153,7 +153,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         self.gen_return(return_position);
 
         let upvalues = u8::try_from(self.upvalues.get_mut().len()).unwrap_or(255);
-        let mut function = match self.kind {
+        let function = match self.kind {
             FunctionKind::Script => vm.allocate_script(self.mark()),
             FunctionKind::Function { name, arity } => {
                 vm.allocate_function(name, arity, upvalues, self.mark())
@@ -161,7 +161,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         };
         // set chunk after allocating function so that constants in the chunk will be marked by self.mark()
         unsafe {
-            function.as_mut().set_chunk(self.chunk_builder.take());
+            vm.set_chunk(function, self.chunk_builder.take());
         }
 
         Some((

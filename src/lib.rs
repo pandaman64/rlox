@@ -11,6 +11,7 @@ pub mod value;
 pub mod vm;
 
 use std::{
+    collections::HashMap,
     convert::TryInto,
     io::{self, Write},
     sync::{
@@ -27,6 +28,29 @@ use syntax::{SyntaxError, SyntaxNode};
 use vm::Vm;
 
 use crate::vm::InterpretResult;
+
+pub(crate) trait HeapSize {
+    fn heap_size(&self) -> usize;
+}
+
+impl<T> HeapSize for Box<[T]> {
+    fn heap_size(&self) -> usize {
+        self.len() * std::mem::size_of::<T>()
+    }
+}
+
+impl HeapSize for String {
+    fn heap_size(&self) -> usize {
+        self.capacity()
+    }
+}
+
+impl<K, V> HeapSize for HashMap<K, V> {
+    fn heap_size(&self) -> usize {
+        let size = std::mem::size_of::<(K, V)>();
+        self.capacity() * size
+    }
+}
 
 #[derive(Debug)]
 pub enum Error {

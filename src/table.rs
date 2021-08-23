@@ -7,6 +7,7 @@ use std::{
 use crate::{
     value::Value,
     vm::object::{RawObject, RawStr},
+    HeapSize,
 };
 
 #[derive(Clone, Copy)]
@@ -88,6 +89,12 @@ impl Default for Table {
     }
 }
 
+impl HeapSize for Table {
+    fn heap_size(&self) -> usize {
+        self.map.heap_size()
+    }
+}
+
 impl Table {
     pub fn new() -> Self {
         Self::default()
@@ -102,9 +109,10 @@ impl Table {
     }
 
     pub fn insert(&mut self, allocated: &mut usize, key: Key, value: Value) {
-        let old_cap = self.map.capacity();
+        let old_size = self.heap_size();
         self.map.insert(key, value);
-        *allocated += self.map.capacity() - old_cap;
+        let new_size = self.heap_size();
+        *allocated += new_size - old_size;
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&Key, &Value)> {

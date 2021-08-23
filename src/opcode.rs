@@ -7,6 +7,7 @@ use crate::{
     trace_available,
     value::Value,
     vm::object::{self, ObjectRef},
+    HeapSize,
 };
 
 #[repr(u8)]
@@ -51,6 +52,12 @@ pub struct Chunk {
     code: Box<[u8]>,
     line: Box<[usize]>,
     constants: Box<[Value]>,
+}
+
+impl HeapSize for Chunk {
+    fn heap_size(&self) -> usize {
+        self.code.heap_size() + self.line.heap_size() + self.constants.heap_size()
+    }
 }
 
 fn trace_simple_code(offset: usize, s: &str) -> usize {
