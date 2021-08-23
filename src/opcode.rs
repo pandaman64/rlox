@@ -53,12 +53,6 @@ pub struct Chunk {
     constants: Vec<Value>,
 }
 
-impl Chunk {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
 fn trace_simple_code(offset: usize, s: &str) -> usize {
     eprintln!("{}", s);
     offset + 1
@@ -92,6 +86,10 @@ fn trace_jump_code(chunk: &Chunk, offset: usize, s: &str) -> usize {
 }
 
 impl Chunk {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     // I don't know why only this function triggers clippy warning about missing SAFETY section
     /// # Safety
     ///
