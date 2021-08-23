@@ -411,6 +411,18 @@ where
                         self.parse_block_stmt();
                         self.builder.finish_node();
                     }
+                    ClassToken => {
+                        self.builder.start_node(ClassDeclNode.into());
+                        self.bump();
+
+                        // class name
+                        self.expect(IdentifierToken);
+
+                        self.expect(BraceOpenToken);
+                        self.expect(BraceCloseToken);
+
+                        self.builder.finish_node();
+                    }
                     // statements
                     _ => {
                         self.parse_stmt();

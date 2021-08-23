@@ -640,11 +640,11 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             self.push_local(ident);
             // if allow_reference_in_value is set, we declare that the local is initialized already,
             // so that the generated value can refer to the variable defined.
-            if allow_reference_in_value {
+            // moreover, it is possible that the locals slot overflows and this local is not inserted
+            if allow_reference_in_value && idx < self.locals.len() {
                 self.locals[idx].depth = self.block_depth;
             }
             gen_value(self, vm);
-            // it is possible that the locals slot overflows and this local is not inserted
             if !allow_reference_in_value && idx < self.locals.len() {
                 self.locals[idx].depth = self.block_depth;
             }
@@ -684,8 +684,9 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         match decl {
             Decl::VarDecl(decl) => self.gen_var_decl(vm, decl),
             Decl::FunDecl(decl) => {
-                let name = decl.ident().unwrap();
-                let name = vm.allocate_string(name.to_str().into(), self.mark());
+                let ident = decl.ident().unwrap();
+                // TODO: if the declaration is global, we have duplicate allocation for the name
+                let name = vm.allocate_string(ident.to_str().into(), self.mark());
                 let arity = match u8::try_from(decl.params().count()) {
                     Ok(arity) => arity,
                     Err(_) => {
@@ -702,7 +703,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
                 self.define_variable(
                     vm,
-                    decl.ident().unwrap(),
+                    ident,
                     move |this, vm| {
                         let mut compiler = Compiler::new_function(
                             vm,
@@ -745,6 +746,30 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 );
 
                 // remove name from GC root
+                vm.pop();
+            }
+            Decl::ClassDecl(decl) => {
+                let ident = decl.ident().unwrap();
+                // TODO: if the declaration is global, we have duplicate allocation for the name
+                let name = vm.allocate_string(ident.to_str().into(), self.mark());
+
+                // register name as GC root
+                vm.push(Value::Object(name.into_raw_obj()));
+
+                self.define_variable(
+                    vm,
+                    ident,
+                    move |this, _vm| {
+                        let index =
+                            this.push_constant(Value::Object(name.into_raw_obj()), decl.start());
+                        this.push_opcode(OpCode::Class, decl.start());
+                        this.push_u8(index, decl.start());
+
+                        decl.start()
+                    },
+                    true,
+                );
+
                 vm.pop();
             }
             Decl::Stmt(stmt) => self.gen_stmt(vm, stmt),

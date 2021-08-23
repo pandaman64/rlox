@@ -14,6 +14,7 @@ pub type RawStr = NonNull<Str>;
 pub type RawFunction = NonNull<Function>;
 pub type RawClosure = NonNull<Closure>;
 pub type RawUpvalue = NonNull<Upvalue>;
+pub type RawClass = NonNull<Class>;
 
 #[repr(u8)]
 pub enum ObjectKind {
@@ -346,6 +347,13 @@ pub struct Class {
 }
 
 impl Class {
+    pub(in crate::vm) fn new(name: InternedStr) -> Self {
+        Self {
+            header: Header::new(ObjectKind::Class),
+            name,
+        }
+    }
+
     pub fn name(&self) -> InternedStr {
         self.name
     }

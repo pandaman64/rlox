@@ -17,6 +17,7 @@ pub enum OpCode {
     False,
     Constant,
     Closure,
+    Class,
     Pop,
     CloseUpvalue,
     Negate,
@@ -145,6 +146,10 @@ impl Chunk {
                     }
                 }
                 offset
+            }
+            Some(Class) => {
+                // SAFETY: constants in this chunk are valid
+                unsafe { trace_constant_code(self, offset, "OP_CLASS") }
             }
             Some(Pop) => trace_simple_code(offset, "OP_POP"),
             Some(CloseUpvalue) => trace_simple_code(offset, "OP_CLOSE_UPVALUE"),

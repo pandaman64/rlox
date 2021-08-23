@@ -22,7 +22,7 @@ use object::{
     RawUpvalue, Str, Upvalue,
 };
 
-use self::object::RawFunction;
+use self::object::{Class, RawClass, RawFunction};
 
 macro_rules! try_pop {
     ($self:ident, $variant:ident) => {{
@@ -276,6 +276,15 @@ impl Objects {
         frames: &[CallFrame],
     ) -> RawClosure {
         let obj = self.allocate_object(closure, stack, frames, mark_nothing);
+        // SAFETY: obj points to a valid object
+        unsafe {
+            self.add_object_head(obj);
+        }
+        obj.cast()
+    }
+
+    fn allocate_class(&mut self, class: Class, stack: &[Value], frames: &[CallFrame]) -> RawClass {
+        let obj = self.allocate_object(class, stack, frames, mark_nothing);
         // SAFETY: obj points to a valid object
         unsafe {
             self.add_object_head(obj);
@@ -573,6 +582,12 @@ impl<'w> Vm<'w> {
         )
     }
 
+    fn allocate_class(&mut self, name: InternedStr) -> RawClass {
+        let class = Class::new(name);
+        self.objects
+            .allocate_class(class, &self.stack, &self.frames)
+    }
+
     /// # Safety
     /// no chunks referring to objects managed by this vm can be run after calling free_objects
     pub unsafe fn free_all_objects(&mut self) {
@@ -854,6 +869,30 @@ impl<'w> Vm<'w> {
                         *upvalue = upvalue_obj;
                     }
                 },
+                Some(Class) => {
+                    let name = extract_constant(&mut frame.ip, chunk);
+                    match name {
+                        // SAFETY: name is a valid object
+                        Value::Object(name) => unsafe {
+                            match object::as_ref(name) {
+                                ObjectRef::Str(_) => {
+                                    // SAFETY: name is a valid string
+                                    let name = InternedStr::new(name.cast());
+                                    let class = self.allocate_class(name);
+                                    self.stack.push(Value::Object(class.cast()))
+                                }
+                                _ => {
+                                    eprintln!("class name must be a string.");
+                                    return InterpretResult::CompileError;
+                                }
+                            }
+                        },
+                        _ => {
+                            eprintln!("class name must be a string.");
+                            return InterpretResult::CompileError;
+                        }
+                    }
+                }
                 Some(DefineGlobal) => {
                     let key = match extract_constant_key(&mut frame.ip, chunk) {
                         Some(key) => key,

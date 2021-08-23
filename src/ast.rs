@@ -540,6 +540,43 @@ impl FunDecl {
 }
 
 #[derive(Debug)]
+pub struct ClassDecl {
+    inner: SyntaxNode,
+}
+
+impl ClassDecl {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::ClassDeclNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
+    pub fn return_position(&self) -> usize {
+        // the position of `}` if exists.
+        // return the end of the node if not exist.
+        self.inner
+            .children_with_tokens()
+            .find_map(|child| match child {
+                NodeOrToken::Token(token) if token.kind() == SyntaxKind::BraceCloseToken => {
+                    Some(token.text_range().start().into())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| self.inner.text_range().end().into())
+    }
+
+    pub fn ident(&self) -> Option<Identifier> {
+        self.inner.children_with_tokens().find_map(try_as_ident)
+    }
+}
+
+#[derive(Debug)]
 pub struct ExprStmt {
     inner: SyntaxNode,
 }
@@ -861,6 +898,7 @@ impl Stmt {
 pub enum Decl {
     VarDecl(VarDecl),
     FunDecl(FunDecl),
+    ClassDecl(ClassDecl),
     Stmt(Stmt),
 }
 
@@ -873,6 +911,7 @@ impl Decl {
             Some(match child.kind() {
                 VarDeclNode => Self::VarDecl(VarDecl::cast(child)?),
                 FunDeclNode => Self::FunDecl(FunDecl::cast(child)?),
+                ClassDeclNode => Self::ClassDecl(ClassDecl::cast(child)?),
                 StmtNode => Self::Stmt(Stmt::cast(child)?),
                 _ => return None,
             })
@@ -887,6 +926,7 @@ impl Decl {
         match self {
             VarDecl(decl) => decl.return_position(),
             FunDecl(decl) => decl.return_position(),
+            ClassDecl(decl) => decl.return_position(),
             Stmt(decl) => decl.return_position(),
         }
     }
