@@ -216,6 +216,10 @@ impl Function {
         }
     }
 
+    pub fn set_chunk(&mut self, chunk: Chunk) {
+        self.chunk = chunk;
+    }
+
     pub fn name(&self) -> Option<InternedStr> {
         self.name
     }
@@ -228,16 +232,8 @@ impl Function {
         self.upvalues
     }
 
-    pub fn upvalues_mut(&mut self) -> &mut u8 {
-        &mut self.upvalues
-    }
-
     pub fn chunk(&self) -> &Chunk {
         &self.chunk
-    }
-
-    pub fn chunk_mut(&mut self) -> &mut Chunk {
-        &mut self.chunk
     }
 
     /// # Safety

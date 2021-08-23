@@ -48,9 +48,9 @@ pub enum OpCode {
 #[derive(Default)]
 pub struct Chunk {
     // invariant: code.len() == line.len()
-    code: Vec<u8>,
-    line: Vec<usize>,
-    constants: Vec<Value>,
+    code: Box<[u8]>,
+    line: Box<[usize]>,
+    constants: Box<[Value]>,
 }
 
 fn trace_simple_code(offset: usize, s: &str) -> usize {
@@ -206,6 +206,45 @@ impl Chunk {
                     offset = self.trace_code(offset);
                 }
             }
+        }
+    }
+
+    pub fn code(&self) -> &[u8] {
+        &self.code
+    }
+
+    pub fn line(&self) -> &[usize] {
+        &self.line
+    }
+
+    pub fn constants(&self) -> &[Value] {
+        &self.constants
+    }
+
+    pub fn read_jump_location(&self, offset: usize) -> i16 {
+        i16::from_le_bytes([self.code[offset], self.code[offset + 1]])
+    }
+}
+
+#[derive(Default)]
+pub struct ChunkBuilder {
+    // invariant: code.len() == line.len()
+    code: Vec<u8>,
+    line: Vec<usize>,
+    constants: Vec<Value>,
+}
+
+impl ChunkBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn take(&mut self) -> Chunk {
+        use std::mem::take;
+        Chunk {
+            code: take(&mut self.code).into_boxed_slice(),
+            line: take(&mut self.line).into_boxed_slice(),
+            constants: take(&mut self.constants).into_boxed_slice(),
         }
     }
 

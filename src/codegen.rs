@@ -8,7 +8,7 @@ use crate::{
         BinOpKind, BlockStmt, Decl, Expr, ForInit, Identifier, Primary, Stmt, UnaryOpKind, VarDecl,
     },
     line_map::LineMap,
-    opcode::{Chunk, OpCode},
+    opcode::{ChunkBuilder, OpCode},
     table::InternedStr,
     value::Value,
     vm::{
@@ -44,17 +44,29 @@ pub struct Upvalue {
     is_local: bool,
 }
 
-#[derive(Debug)]
 pub enum FunctionKind {
-    Function,
+    Function { name: InternedStr, arity: u8 },
     Script,
+}
+
+impl FunctionKind {
+    fn mark(&self, worklist: &mut Vec<RawObject>) {
+        #[allow(clippy::single_match)]
+        match self {
+            FunctionKind::Function { name, .. } => unsafe {
+                object::mark(name.into_raw_obj(), worklist);
+            },
+            _ => {}
+        }
+    }
 }
 
 pub struct Compiler<'parent, 'map> {
     parent: Option<&'parent Compiler<'parent, 'map>>,
-    function: RawFunction,
+    chunk_builder: ChunkBuilder,
     kind: FunctionKind,
     locals: Vec<Local>,
+    // since we do not close values for these upvalues, we do not trace them for GC
     upvalues: RefCell<Vec<Upvalue>>,
     block_depth: usize,
     line_map: &'map LineMap,
@@ -73,13 +85,11 @@ fn new_locals() -> Vec<Local> {
     ]
 }
 
-fn mark_nothing(_worklist: &mut Vec<RawObject>) {}
-
 impl<'parent, 'map> Compiler<'parent, 'map> {
-    pub fn new_script(vm: &mut Vm<'_>, line_map: &'map LineMap) -> Self {
+    pub fn new_script(line_map: &'map LineMap) -> Self {
         Self {
             parent: None,
-            function: vm.allocate_script(mark_nothing),
+            chunk_builder: ChunkBuilder::new(),
             kind: FunctionKind::Script,
             locals: new_locals(),
             upvalues: RefCell::new(vec![]),
@@ -91,7 +101,6 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     }
 
     fn new_function(
-        vm: &mut Vm<'_>,
         parent: &'parent Compiler<'parent, 'map>,
         name: InternedStr,
         arity: u8,
@@ -100,8 +109,8 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     ) -> Self {
         Self {
             parent: Some(parent),
-            function: vm.allocate_function(name, arity, 0, parent.mark()),
-            kind: FunctionKind::Function,
+            chunk_builder: ChunkBuilder::new(),
+            kind: FunctionKind::Function { name, arity },
             locals: new_locals(),
             upvalues: RefCell::new(vec![]),
             block_depth: 0,
@@ -113,9 +122,12 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
     fn mark(&self) -> impl FnOnce(&mut Vec<RawObject>) + '_ {
         move |worklist| {
-            // SAFETY: self owns the function and must not be deallocated by vm
+            self.kind.mark(worklist);
+            // SAFETY: self owns the chunk and must not be deallocated by vm
             unsafe {
-                object::mark(self.function.cast(), worklist);
+                for constant in self.chunk_builder.constants().iter() {
+                    constant.mark(worklist);
+                }
             }
             if let Some(parent) = self.parent {
                 parent.mark()(worklist);
@@ -123,23 +135,37 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         }
     }
 
-    fn chunk(&self) -> &Chunk {
-        // SAFETY: self owns the function and must not be deallocated by vm
-        unsafe { self.function.as_ref().chunk() }
+    fn chunk(&self) -> &ChunkBuilder {
+        &self.chunk_builder
     }
 
-    fn chunk_mut(&mut self) -> &mut Chunk {
-        // SAFETY: self owns the function and must not be deallocated by vm
-        unsafe { self.function.as_mut().chunk_mut() }
+    fn chunk_mut(&mut self) -> &mut ChunkBuilder {
+        &mut self.chunk_builder
     }
 
     /// - Returns `Some((function, upvalues, error))` if the code contains at least one declaration.
     /// - Returns `None` if the code does not contain any declaration.
-    pub fn finish(mut self) -> Option<(RawFunction, Vec<Upvalue>, Vec<CodegenError>)> {
+    pub fn finish(
+        mut self,
+        vm: &mut Vm<'_>,
+    ) -> Option<(RawFunction, Vec<Upvalue>, Vec<CodegenError>)> {
         let return_position = self.return_position?;
         self.gen_return(return_position);
+
+        let upvalues = u8::try_from(self.upvalues.get_mut().len()).unwrap_or(255);
+        let mut function = match self.kind {
+            FunctionKind::Script => vm.allocate_script(self.mark()),
+            FunctionKind::Function { name, arity } => {
+                vm.allocate_function(name, arity, upvalues, self.mark())
+            }
+        };
+        // set chunk after allocating function so that constants in the chunk will be marked by self.mark()
+        unsafe {
+            function.as_mut().set_chunk(self.chunk_builder.take());
+        }
+
         Some((
-            self.function,
+            function,
             self.upvalues.into_inner(),
             self.errors.into_inner(),
         ))
@@ -542,7 +568,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                             position: stmt.start(),
                         })
                 }
-                FunctionKind::Function => {
+                FunctionKind::Function { .. } => {
                     match stmt.expr() {
                         Some(expr) => self.gen_expr(vm, expr),
                         None => self.push_opcode(OpCode::Nil, stmt.start()),
@@ -730,7 +756,6 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     ident,
                     move |this, vm| {
                         let mut compiler = Compiler::new_function(
-                            vm,
                             this,
                             name,
                             arity,
@@ -744,12 +769,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         }
                         compiler.gen_block_stmt(vm, decl.body().unwrap(), false);
                         compiler.end_block(decl.start());
-                        let (mut fun_obj, upvalues, errors) = compiler.finish().unwrap();
-                        // the function is valid
-                        unsafe {
-                            *fun_obj.as_mut().upvalues_mut() =
-                                u8::try_from(upvalues.len()).unwrap_or(255);
-                        }
+                        let (fun_obj, upvalues, errors) = compiler.finish(vm).unwrap();
                         this.errors.get_mut().extend(errors);
 
                         let index = this.push_constant(Value::Object(fun_obj.cast()), decl.start());

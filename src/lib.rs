@@ -243,7 +243,7 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
         return Err(Error::Syntax);
     }
 
-    let mut compiler = Compiler::new_script(&mut vm, &line_map);
+    let mut compiler = Compiler::new_script(&line_map);
     let root = Root::cast(node.clone()).unwrap();
     for decl in root.decls() {
         compiler.gen_decl(&mut vm, decl);
@@ -251,7 +251,7 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
 
     // SAFETY: we construct a chunk with valid constants
     let result = unsafe {
-        let (function, upvalues, errors) = match compiler.finish() {
+        let (function, upvalues, errors) = match compiler.finish(&mut vm) {
             Some(v) => v,
             None => return Ok(()),
         };

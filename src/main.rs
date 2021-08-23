@@ -56,7 +56,7 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
             continue;
         }
 
-        let mut compiler = Compiler::new_script(&mut vm, &line_map);
+        let mut compiler = Compiler::new_script(&line_map);
         match Root::cast(node.clone()) {
             None => {
                 eprintln!("syntax error");
@@ -70,7 +70,7 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
         };
         // SAFETY: we construct a chunk with valid constants
         unsafe {
-            let (function, upvalues, errors) = match compiler.finish() {
+            let (function, upvalues, errors) = match compiler.finish(&mut vm) {
                 Some(v) => v,
                 None => continue,
             };

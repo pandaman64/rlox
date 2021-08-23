@@ -252,6 +252,7 @@ impl Objects {
         obj.cast()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn allocate_function<F: FnOnce(&mut Vec<RawObject>)>(
         &mut self,
         name: InternedStr,
