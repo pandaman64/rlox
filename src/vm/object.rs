@@ -1,9 +1,12 @@
-use std::ptr::{self, NonNull};
+use std::{
+    collections::HashMap,
+    ptr::{self, NonNull},
+};
 
 use crate::{
     log_gc,
     opcode::Chunk,
-    table::InternedStr,
+    table::{InternedStr, Key},
     value::{self, Value},
 };
 
@@ -15,6 +18,7 @@ pub type RawFunction = NonNull<Function>;
 pub type RawClosure = NonNull<Closure>;
 pub type RawUpvalue = NonNull<Upvalue>;
 pub type RawClass = NonNull<Class>;
+pub type RawInstance = NonNull<Instance>;
 
 #[repr(u8)]
 pub enum ObjectKind {
@@ -24,6 +28,7 @@ pub enum ObjectKind {
     Closure,
     Upvalue,
     Class,
+    Instance,
 }
 
 #[repr(C)]
@@ -52,6 +57,7 @@ pub enum ObjectRef<'a> {
     // upvalues might contain self-referential pointer, so we do not provide a reference
     Upvalue(*const Upvalue),
     Class(&'a Class),
+    Instance(&'a Instance),
 }
 
 /// # Safety
@@ -84,6 +90,10 @@ pub unsafe fn as_ref<'a>(obj: RawObject) -> ObjectRef<'a> {
             ObjectKind::Class => {
                 let class_ptr: *const Class = obj.cast();
                 ObjectRef::Class(class_ptr.as_ref().unwrap())
+            }
+            ObjectKind::Instance => {
+                let instance_ptr: *const Instance = obj.cast();
+                ObjectRef::Instance(instance_ptr.as_ref().unwrap())
             }
         }
     }
@@ -146,6 +156,14 @@ pub unsafe fn blacken(obj: RawObject, worklist: &mut Vec<RawObject>) {
             ObjectKind::Class => {
                 let class: *mut Class = ptr.cast();
                 mark((*class).name.into_raw_obj().cast(), worklist);
+            }
+            ObjectKind::Instance => {
+                let instance: *mut Instance = ptr.cast();
+                mark((*instance).class.cast(), worklist);
+                for (key, value) in (*instance).fields.iter() {
+                    mark(key.into_raw_obj(), worklist);
+                    value.mark(worklist);
+                }
             }
         }
     }
@@ -356,5 +374,26 @@ impl Class {
 
     pub fn name(&self) -> InternedStr {
         self.name
+    }
+}
+
+#[repr(C)]
+pub struct Instance {
+    header: Header,
+    class: RawClass,
+    fields: HashMap<Key, Value>,
+}
+
+impl Instance {
+    pub(in crate::vm) fn new(class: RawClass) -> Self {
+        Self {
+            header: Header::new(ObjectKind::Instance),
+            class,
+            fields: HashMap::new(),
+        }
+    }
+
+    pub fn class(&self) -> RawClass {
+        self.class
     }
 }

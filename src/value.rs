@@ -21,6 +21,7 @@ pub enum ValueDisplay<'v> {
     Function(Value),
     NativeFunction,
     Upvalue,
+    Instance(Value),
 }
 
 impl fmt::Display for ValueDisplay<'_> {
@@ -37,6 +38,7 @@ impl fmt::Display for ValueDisplay<'_> {
             Function(name) => write!(f, "<fn {}>", unsafe { name.format_args() }),
             NativeFunction => write!(f, "<native fn>"),
             Upvalue => write!(f, "<upvalue>"),
+            Instance(class) => write!(f, "{} instance", unsafe { class.format_args() }),
         }
     }
 }
@@ -58,6 +60,9 @@ pub unsafe fn format_obj<'obj>(obj: RawObject) -> ValueDisplay<'obj> {
         ObjectRef::Upvalue(_) => ValueDisplay::Upvalue,
         // SAFETY: the object must be recursively valid.
         ObjectRef::Class(class) => unsafe { format_obj(class.name().into_raw_obj()) },
+        ObjectRef::Instance(instance) => {
+            ValueDisplay::Instance(Value::Object(instance.class().cast()))
+        }
     }
 }
 

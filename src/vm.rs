@@ -22,7 +22,7 @@ use object::{
     RawUpvalue, Str, Upvalue,
 };
 
-use self::object::{Class, RawClass, RawFunction};
+use self::object::{Class, Instance, RawClass, RawFunction, RawInstance};
 
 macro_rules! try_pop {
     ($self:ident, $variant:ident) => {{
@@ -184,6 +184,7 @@ impl Objects {
                 ObjectKind::Closure => free!(obj_ptr, Closure),
                 ObjectKind::Upvalue => free!(obj_ptr, Upvalue),
                 ObjectKind::Class => free!(obj_ptr, Class),
+                ObjectKind::Instance => free!(obj_ptr, Instance),
             }
 
             next
@@ -285,6 +286,20 @@ impl Objects {
 
     fn allocate_class(&mut self, class: Class, stack: &[Value], frames: &[CallFrame]) -> RawClass {
         let obj = self.allocate_object(class, stack, frames, mark_nothing);
+        // SAFETY: obj points to a valid object
+        unsafe {
+            self.add_object_head(obj);
+        }
+        obj.cast()
+    }
+
+    fn allocate_instance(
+        &mut self,
+        instance: Instance,
+        stack: &[Value],
+        frames: &[CallFrame],
+    ) -> RawInstance {
+        let obj = self.allocate_object(instance, stack, frames, mark_nothing);
         // SAFETY: obj points to a valid object
         unsafe {
             self.add_object_head(obj);
@@ -588,6 +603,12 @@ impl<'w> Vm<'w> {
             .allocate_class(class, &self.stack, &self.frames)
     }
 
+    fn allocate_instance(&mut self, class: RawClass) -> RawInstance {
+        let instance = Instance::new(class);
+        self.objects
+            .allocate_instance(instance, &self.stack, &self.frames)
+    }
+
     /// # Safety
     /// no chunks referring to objects managed by this vm can be run after calling free_objects
     pub unsafe fn free_all_objects(&mut self) {
@@ -670,6 +691,7 @@ impl<'w> Vm<'w> {
         };
         // SAFETY: values in the stack are valid
         match unsafe { object::as_ref(callee) } {
+            // call the given closure
             ObjectRef::Closure(closure) => {
                 // SAFETY: `function` is a reference to the function object derived by `closure.function`.
                 // since we assume that our GC keeps values reachable from the stack valid, accessing
@@ -690,17 +712,26 @@ impl<'w> Vm<'w> {
                 });
                 true
             }
+            // call the given native function
             ObjectRef::NativeFunction(function) => {
                 let result = function.fun()(&self.stack[bp..]);
                 self.stack.truncate(bp);
                 self.stack.push(result);
                 true
             }
+            // initialize an instance of the given class (akin to `new`)
+            ObjectRef::Class(_class) => {
+                // TODO: pass arguments to the constructor
+                let instance = self.allocate_instance(callee.cast());
+                self.stack.truncate(bp);
+                self.stack.push(Value::Object(instance.cast()));
+                true
+            }
             ObjectRef::Function(_function) => {
                 eprintln!("Can only call functions and classes.");
                 false
             }
-            ObjectRef::Str(_) | ObjectRef::Upvalue(_) | ObjectRef::Class(_) => {
+            ObjectRef::Str(_) | ObjectRef::Upvalue(_) | ObjectRef::Instance(_) => {
                 eprintln!("Can only call functions and classes.");
                 false
             }

@@ -46,11 +46,12 @@ print f();
 #[test]
 fn test_class_decl() {
     let input = r#"class Brioche {}
-    print Brioche;"#;
+    print Brioche;
+    print Brioche();"#;
     std::env::set_var("RUST_LOG", "trace");
     std::env::set_var("RLOX_LOG_GC", "1");
     std::env::set_var("RLOX_STRESS_GC", "1");
     let mut output = vec![];
     run(input, &mut output).unwrap();
-    assert_eq!(output, b"Brioche\n");
+    assert_eq!(output, b"Brioche\nBrioche instance\n");
 }
