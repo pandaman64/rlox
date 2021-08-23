@@ -56,6 +56,8 @@ pub unsafe fn format_obj<'obj>(obj: RawObject) -> ValueDisplay<'obj> {
         // SAFETY: the object must be recursively valid.
         ObjectRef::Closure(cls) => unsafe { format_obj(cls.function().cast()) },
         ObjectRef::Upvalue(_) => ValueDisplay::Upvalue,
+        // SAFETY: the object must be recursively valid.
+        ObjectRef::Class(class) => unsafe { format_obj(class.name().into_raw_obj()) },
     }
 }
 

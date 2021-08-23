@@ -183,6 +183,7 @@ impl Objects {
                 ObjectKind::NativeFunction => free!(obj_ptr, NativeFunction),
                 ObjectKind::Closure => free!(obj_ptr, Closure),
                 ObjectKind::Upvalue => free!(obj_ptr, Upvalue),
+                ObjectKind::Class => free!(obj_ptr, Class),
             }
 
             next
@@ -684,7 +685,7 @@ impl<'w> Vm<'w> {
                 eprintln!("Can only call functions and classes.");
                 false
             }
-            ObjectRef::Str(_) | ObjectRef::Upvalue(_) => {
+            ObjectRef::Str(_) | ObjectRef::Upvalue(_) | ObjectRef::Class(_) => {
                 eprintln!("Can only call functions and classes.");
                 false
             }

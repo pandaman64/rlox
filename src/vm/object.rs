@@ -22,6 +22,7 @@ pub enum ObjectKind {
     NativeFunction,
     Closure,
     Upvalue,
+    Class,
 }
 
 #[repr(C)]
@@ -49,34 +50,39 @@ pub enum ObjectRef<'a> {
     Closure(&'a Closure),
     // upvalues might contain self-referential pointer, so we do not provide a reference
     Upvalue(*const Upvalue),
+    Class(&'a Class),
 }
 
 /// # Safety
 /// the object must be initialized and its kind must match the runtime representation.
 pub unsafe fn as_ref<'a>(obj: RawObject) -> ObjectRef<'a> {
     unsafe {
-        let obj = obj.as_ptr();
-        let kind_ptr = ptr::addr_of_mut!((*obj).kind);
+        let obj: *const Header = obj.as_ptr();
+        let kind_ptr = ptr::addr_of!((*obj).kind);
         match ptr::read(kind_ptr) {
             ObjectKind::Str => {
-                let str_ptr = obj as *mut Str;
+                let str_ptr: *const Str = obj.cast();
                 ObjectRef::Str(str_ptr.as_ref().unwrap())
             }
             ObjectKind::Function => {
-                let fun_ptr = obj as *mut Function;
+                let fun_ptr: *const Function = obj.cast();
                 ObjectRef::Function(fun_ptr.as_ref().unwrap())
             }
             ObjectKind::NativeFunction => {
-                let fun_ptr = obj as *mut NativeFunction;
+                let fun_ptr: *const NativeFunction = obj.cast();
                 ObjectRef::NativeFunction(fun_ptr.as_ref().unwrap())
             }
             ObjectKind::Closure => {
-                let cls_ptr = obj as *mut Closure;
+                let cls_ptr: *const Closure = obj.cast();
                 ObjectRef::Closure(cls_ptr.as_ref().unwrap())
             }
             ObjectKind::Upvalue => {
-                let upvalue_ptr = obj as *mut Upvalue;
+                let upvalue_ptr: *const Upvalue = obj.cast();
                 ObjectRef::Upvalue(upvalue_ptr)
+            }
+            ObjectKind::Class => {
+                let class_ptr: *const Class = obj.cast();
+                ObjectRef::Class(class_ptr.as_ref().unwrap())
             }
         }
     }
@@ -135,6 +141,10 @@ pub unsafe fn blacken(obj: RawObject, worklist: &mut Vec<RawObject>) {
             ObjectKind::Upvalue => {
                 let upvalue: *mut Upvalue = ptr.cast();
                 (*upvalue).closed_value.mark(worklist);
+            }
+            ObjectKind::Class => {
+                let class: *mut Class = ptr.cast();
+                mark((*class).name.into_raw_obj().cast(), worklist);
             }
         }
     }
@@ -326,5 +336,17 @@ impl Upvalue {
     pub fn close(&mut self, value: Value) {
         self.stack_index = usize::MAX;
         self.closed_value = value;
+    }
+}
+
+#[repr(C)]
+pub struct Class {
+    header: Header,
+    name: InternedStr,
+}
+
+impl Class {
+    pub fn name(&self) -> InternedStr {
+        self.name
     }
 }
