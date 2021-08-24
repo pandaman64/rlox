@@ -81,3 +81,21 @@ scone.topping("berries", "cream");"#;
     run(input, &mut output).unwrap();
     assert_eq!(output, b"scone with berries and cream\n");
 }
+
+#[test]
+fn test_this() {
+    let input = r#"class Scone {
+    topping() {
+        print "scone with " + this.first + " and " + this.second;
+    }
+}
+
+var scone = Scone();
+scone.first = "berries";
+scone.second = "cream";
+scone.topping();"#;
+    std::env::set_var("RUST_LOG", "trace");
+    let mut output = vec![];
+    run(input, &mut output).unwrap();
+    assert_eq!(output, b"scone with berries and cream\n");
+}

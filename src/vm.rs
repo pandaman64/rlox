@@ -770,6 +770,7 @@ impl<'w> Vm<'w> {
             ObjectRef::Closure(_closure) => self.push_frame(callee.cast(), args, bp),
             // call the bound closure
             ObjectRef::BoundMethod(bound_method) => {
+                self.stack[bp] = bound_method.receiver();
                 self.push_frame(bound_method.method(), args, bp)
             }
             // call the given native function
@@ -1185,7 +1186,7 @@ impl<'w> Vm<'w> {
                                     if matches!(object::as_ref(obj), ObjectRef::Closure(_)) =>
                                 {
                                     let bound_method = self.allocate_bound_method(
-                                        Value::Object(instance.as_ref().class().cast()),
+                                        Value::Object(instance.cast()),
                                         obj.cast(),
                                     );
                                     // pop the instance

@@ -296,12 +296,43 @@ impl BooleanLiteral {
 }
 
 #[derive(Debug)]
+pub struct This {
+    inner: SyntaxToken,
+}
+
+impl This {
+    pub fn cast(inner: SyntaxToken) -> Option<Self> {
+        if matches!(inner.kind(), SyntaxKind::ThisToken) {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
+    pub fn end(&self) -> usize {
+        self.inner.text_range().end().into()
+    }
+
+    pub fn to_ident(&self) -> Identifier {
+        // technically, this code breaks the invariant
+        Identifier {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum Primary {
     Identifier(Identifier),
     NilLiteral(NilLiteral),
     BooleanLiteral(BooleanLiteral),
     StringLiteral(StringLiteral),
     NumberLiteral(NumberLiteral),
+    This(This),
 }
 
 impl Primary {
@@ -316,6 +347,7 @@ impl Primary {
                 TrueToken | FalseToken => Self::BooleanLiteral(BooleanLiteral::cast(child)?),
                 StringLiteralToken => Self::StringLiteral(StringLiteral::cast(child)?),
                 NumberToken => Self::NumberLiteral(NumberLiteral::cast(child)?),
+                ThisToken => Self::This(This::cast(child)?),
                 _ => return None,
             })
         } else {
@@ -332,6 +364,7 @@ impl Primary {
             BooleanLiteral(boolean) => boolean.start(),
             StringLiteral(string) => string.start(),
             NumberLiteral(number) => number.start(),
+            This(this) => this.start(),
         }
     }
 
@@ -344,6 +377,7 @@ impl Primary {
             BooleanLiteral(boolean) => boolean.end(),
             StringLiteral(string) => string.end(),
             NumberLiteral(number) => number.end(),
+            This(this) => this.end(),
         }
     }
 }

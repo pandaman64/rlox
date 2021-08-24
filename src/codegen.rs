@@ -1,6 +1,7 @@
 use std::{
     cell::{Cell, RefCell},
     convert::TryFrom,
+    rc::Rc,
 };
 
 use crate::{
@@ -32,6 +33,7 @@ pub enum CodegenError {
     TooManyParameters { position: usize },
     TooManyArguments { position: usize },
     TooManyUpvalues { position: usize },
+    ThisOutsideClass { position: usize },
 }
 
 struct Local {
@@ -47,14 +49,14 @@ pub struct Upvalue {
 
 pub enum FunctionKind {
     Function { name: InternedStr, arity: u8 },
+    Method { name: InternedStr, arity: u8 },
     Script,
 }
 
 impl FunctionKind {
     fn mark(&self, worklist: &mut Vec<RawObject>) {
-        #[allow(clippy::single_match)]
         match self {
-            FunctionKind::Function { name, .. } => unsafe {
+            FunctionKind::Function { name, .. } | FunctionKind::Method { name, .. } => unsafe {
                 object::mark(name.into_raw_obj(), worklist);
             },
             _ => {}
@@ -62,8 +64,14 @@ impl FunctionKind {
     }
 }
 
+struct ClassCompiler {
+    #[allow(dead_code)]
+    enclosing: Option<Rc<Self>>,
+}
+
 pub struct Compiler<'parent, 'map> {
     parent: Option<&'parent Compiler<'parent, 'map>>,
+    current_class: Option<Rc<ClassCompiler>>,
     chunk_builder: ChunkBuilder,
     kind: FunctionKind,
     locals: Vec<Local>,
@@ -75,24 +83,29 @@ pub struct Compiler<'parent, 'map> {
     errors: RefCell<Vec<CodegenError>>,
 }
 
-fn new_locals() -> Vec<Local> {
-    vec![
-        // This corresponds to the callee, and local variables starts with index 1
-        Local {
-            ident: "<callee>".into(),
-            depth: 0,
-            captured: Cell::new(false),
-        },
-    ]
+fn new_locals(kind: &FunctionKind) -> Vec<Local> {
+    let ident = match kind {
+        FunctionKind::Method { .. } => "this".into(),
+        _ => "<callee>".into(),
+    };
+    // This corresponds to the callee, and local variables starts with index 1
+    vec![Local {
+        ident,
+        depth: 0,
+        captured: Cell::new(false),
+    }]
 }
 
 impl<'parent, 'map> Compiler<'parent, 'map> {
     pub fn new_script(line_map: &'map LineMap) -> Self {
+        let kind = FunctionKind::Script;
+        let locals = new_locals(&kind);
         Self {
             parent: None,
+            current_class: None,
             chunk_builder: ChunkBuilder::new(),
-            kind: FunctionKind::Script,
-            locals: new_locals(),
+            kind,
+            locals,
             upvalues: RefCell::new(vec![]),
             block_depth: 0,
             line_map,
@@ -103,16 +116,18 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
     fn new_function(
         parent: &'parent Compiler<'parent, 'map>,
-        name: InternedStr,
-        arity: u8,
+        current_class: Option<Rc<ClassCompiler>>,
+        kind: FunctionKind,
         line_map: &'map LineMap,
         return_position: usize,
     ) -> Self {
+        let locals = new_locals(&kind);
         Self {
             parent: Some(parent),
+            current_class,
             chunk_builder: ChunkBuilder::new(),
-            kind: FunctionKind::Function { name, arity },
-            locals: new_locals(),
+            kind,
+            locals,
             upvalues: RefCell::new(vec![]),
             block_depth: 0,
             line_map,
@@ -156,7 +171,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         let upvalues = u8::try_from(self.upvalues.get_mut().len()).unwrap_or(255);
         let function = match self.kind {
             FunctionKind::Script => vm.allocate_script(self.mark()),
-            FunctionKind::Function { name, arity } => {
+            FunctionKind::Function { name, arity } | FunctionKind::Method { name, arity } => {
                 vm.allocate_function(name, arity, upvalues, self.mark())
             }
         };
@@ -515,6 +530,17 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     self.push_opcode(OpCode::Constant, num.start());
                     self.push_u8(index, num.start());
                 }
+                Primary::This(this) => {
+                    if self.current_class.is_none() {
+                        self.errors.get_mut().push(CodegenError::ThisOutsideClass {
+                            position: this.start(),
+                        });
+                        return;
+                    }
+                    let (get_op, _set_op, index) = self.resolve(vm, this.to_ident());
+                    self.push_opcode(get_op, this.start());
+                    self.push_u8(index, this.start());
+                }
             },
             Expr::Call(expr) => {
                 self.gen_expr(vm, expr.function().unwrap());
@@ -569,7 +595,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                             position: stmt.start(),
                         })
                 }
-                FunctionKind::Function { .. } => {
+                FunctionKind::Function { .. } | FunctionKind::Method { .. } => {
                     match stmt.expr() {
                         Some(expr) => self.gen_expr(vm, expr),
                         None => self.push_opcode(OpCode::Nil, stmt.start()),
@@ -731,12 +757,17 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
     fn gen_closure(
         decl: FunDecl,
-        name: InternedStr,
-        arity: u8,
+        current_class: Option<Rc<ClassCompiler>>,
+        kind: FunctionKind,
     ) -> impl FnOnce(&mut Compiler<'parent, 'map>, &mut Vm<'_>) -> usize {
         move |this, vm| {
-            let mut compiler =
-                Compiler::new_function(this, name, arity, this.line_map, decl.return_position());
+            let mut compiler = Compiler::new_function(
+                this,
+                current_class,
+                kind,
+                this.line_map,
+                decl.return_position(),
+            );
             compiler.begin_block();
             for param in decl.params() {
                 compiler.push_local(param);
@@ -787,7 +818,11 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 self.define_variable(
                     vm,
                     ident,
-                    Self::gen_closure(decl, name, arity),
+                    Self::gen_closure(
+                        decl,
+                        self.current_class.clone(),
+                        FunctionKind::Function { name, arity },
+                    ),
                     // functions can refer to themselves inside their body because they are executed
                     // only after the initialization.
                     true,
@@ -797,6 +832,10 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 vm.pop();
             }
             Decl::ClassDecl(decl) => {
+                let current_class = Rc::new(ClassCompiler {
+                    enclosing: self.current_class.clone(),
+                });
+
                 let ident = decl.ident().unwrap();
                 // TODO: if the declaration is global, we have duplicate allocation for the name
                 let name = vm.allocate_string(ident.to_str().into(), self.mark());
@@ -841,7 +880,11 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     // register method_name as GC root
                     vm.push(Value::Object(method_name.into_raw_obj()));
 
-                    Self::gen_closure(method, method_name, arity)(self, vm);
+                    Self::gen_closure(
+                        method,
+                        Some(current_class.clone()),
+                        FunctionKind::Method { name, arity },
+                    )(self, vm);
                     let index = self
                         .push_constant(Value::Object(method_name.into_raw_obj()), method_position);
                     self.push_opcode(OpCode::Method, method_position);
