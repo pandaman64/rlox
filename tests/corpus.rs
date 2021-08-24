@@ -1,6 +1,6 @@
 use std::process::Command;
 
-const TEST: &str = "chap27_classes";
+const TEST: &str = "chap28_methods";
 
 #[test]
 fn test_corpus() {
