@@ -93,6 +93,7 @@ struct Objects {
     open_upvalues_head: Option<RawUpvalue>,
     strings: HashSet<InternedStr>,
     globals: Table,
+    init_str: Option<InternedStr>,
     // in bytes
     allocated: usize,
     next_gc: usize,
@@ -100,14 +101,17 @@ struct Objects {
 
 impl Objects {
     fn new() -> Self {
-        Self {
+        let mut this = Self {
             objects_head: None,
             open_upvalues_head: None,
             strings: HashSet::new(),
             globals: Table::new(),
+            init_str: None,
             allocated: 0,
             next_gc: GC_INITIAL_HEAP,
-        }
+        };
+        this.init_str = Some(this.allocate_string("init".into(), &[], &[], mark_nothing));
+        this
     }
 
     fn allocate_object<T: HeapSize, F: FnOnce(&mut Vec<RawObject>)>(
@@ -208,6 +212,7 @@ impl Objects {
     unsafe fn free_all_objects(&mut self) {
         self.strings.clear();
         self.globals.clear();
+        self.init_str = None;
 
         while let Some(obj) = { self.objects_head } {
             // SAFETY: self.objects points to an initialized object and covers the whole allocation
@@ -535,6 +540,11 @@ impl Objects {
         mark_call_frames(frames, &mut worklist);
         mark_upvalues(self.open_upvalues_head, &mut worklist);
         mark_compiler_roots(&mut worklist);
+        if let Some(init_str) = self.init_str {
+            unsafe {
+                object::mark(init_str.into_raw_obj(), &mut worklist);
+            }
+        }
 
         trace_references(&mut worklist);
         remove_white_interned_string(&mut self.strings);
@@ -715,6 +725,10 @@ impl<'w> Vm<'w> {
         self.stack.pop()
     }
 
+    pub fn init_str(&self) -> InternedStr {
+        self.objects.init_str.unwrap()
+    }
+
     /// # Safety
     /// The given function must be valid
     pub unsafe fn reset(&mut self, function: RawFunction) {
@@ -782,11 +796,33 @@ impl<'w> Vm<'w> {
             }
             // initialize an instance of the given class (akin to `new`)
             ObjectRef::Class(_class) => {
-                // TODO: pass arguments to the constructor
-                let instance = self.allocate_instance(callee.cast());
-                self.stack.truncate(bp);
-                self.stack.push(Value::Object(instance.cast()));
-                true
+                // we must not use _class since we use its parent (callee) here
+                let class = callee.cast();
+                let instance = self.allocate_instance(class);
+                self.stack[bp] = Value::Object(instance.cast());
+
+                let init_str = Key::new(self.objects.init_str.unwrap());
+                // SAFETY: values in the stack are valid
+                unsafe {
+                    if let Some(init) = class.as_ref().methods().get(init_str) {
+                        // the class has init()
+                        match init {
+                            Value::Object(obj)
+                                if matches!(object::as_ref(obj), ObjectRef::Closure(_)) =>
+                            {
+                                self.push_frame(obj.cast(), args, bp)
+                            }
+                            _ => unreachable!(),
+                        }
+                    } else if args != 0 {
+                        // the class does not have init(), but non-zero arguments are supplied
+                        eprintln!("Expected 0 arguments but got {}.", args);
+                        false
+                    } else {
+                        // the class does not have init(), and zero arguments are supplied
+                        true
+                    }
+                }
             }
             ObjectRef::Function(_function) => {
                 eprintln!("Can only call functions and classes.");

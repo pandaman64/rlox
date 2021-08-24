@@ -34,6 +34,7 @@ pub enum CodegenError {
     TooManyArguments { position: usize },
     TooManyUpvalues { position: usize },
     ThisOutsideClass { position: usize },
+    ReturnFromInit { position: usize },
 }
 
 struct Local {
@@ -50,6 +51,7 @@ pub struct Upvalue {
 pub enum FunctionKind {
     Function { name: InternedStr, arity: u8 },
     Method { name: InternedStr, arity: u8 },
+    Initializer { arity: u8 },
     Script,
 }
 
@@ -85,8 +87,8 @@ pub struct Compiler<'parent, 'map> {
 
 fn new_locals(kind: &FunctionKind) -> Vec<Local> {
     let ident = match kind {
-        FunctionKind::Method { .. } => "this".into(),
-        _ => "<callee>".into(),
+        FunctionKind::Method { .. } | FunctionKind::Initializer { .. } => "this".into(),
+        FunctionKind::Function { .. } | FunctionKind::Script => "<callee>".into(),
     };
     // This corresponds to the callee, and local variables starts with index 1
     vec![Local {
@@ -173,6 +175,9 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             FunctionKind::Script => vm.allocate_script(self.mark()),
             FunctionKind::Function { name, arity } | FunctionKind::Method { name, arity } => {
                 vm.allocate_function(name, arity, upvalues, self.mark())
+            }
+            FunctionKind::Initializer { arity } => {
+                vm.allocate_function(vm.init_str(), arity, upvalues, self.mark())
             }
         };
         // set chunk after allocating function so that constants in the chunk will be marked by self.mark()
@@ -368,7 +373,13 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     }
 
     fn gen_return(&mut self, position: usize) {
-        self.push_opcode(OpCode::Nil, position);
+        match self.kind {
+            FunctionKind::Initializer { .. } => {
+                self.push_opcode(OpCode::GetLocal, position);
+                self.push_u8(0, position);
+            }
+            _ => self.push_opcode(OpCode::Nil, position),
+        }
         self.push_opcode(OpCode::Return, position);
     }
 
@@ -600,6 +611,16 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         Some(expr) => self.gen_expr(vm, expr),
                         None => self.push_opcode(OpCode::Nil, stmt.start()),
                     }
+                    self.push_opcode(OpCode::Return, stmt.start());
+                }
+                FunctionKind::Initializer { .. } => {
+                    if stmt.expr().is_some() {
+                        self.errors.get_mut().push(CodegenError::ReturnFromInit {
+                            position: stmt.start(),
+                        });
+                    }
+                    self.push_opcode(OpCode::GetLocal, stmt.start());
+                    self.push_u8(0, stmt.start());
                     self.push_opcode(OpCode::Return, stmt.start());
                 }
             },
@@ -875,16 +896,20 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                             continue;
                         }
                     };
+                    let kind = if method_name == vm.init_str() {
+                        FunctionKind::Initializer { arity }
+                    } else {
+                        FunctionKind::Method {
+                            name: method_name,
+                            arity,
+                        }
+                    };
                     let method_position = method.start();
 
                     // register method_name as GC root
                     vm.push(Value::Object(method_name.into_raw_obj()));
 
-                    Self::gen_closure(
-                        method,
-                        Some(current_class.clone()),
-                        FunctionKind::Method { name, arity },
-                    )(self, vm);
+                    Self::gen_closure(method, Some(current_class.clone()), kind)(self, vm);
                     let index = self
                         .push_constant(Value::Object(method_name.into_raw_obj()), method_position);
                     self.push_opcode(OpCode::Method, method_position);
