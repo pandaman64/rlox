@@ -17,6 +17,7 @@ pub type RawClosure = NonNull<Closure>;
 pub type RawUpvalue = NonNull<Upvalue>;
 pub type RawClass = NonNull<Class>;
 pub type RawInstance = NonNull<Instance>;
+pub type RawBoundMethod = NonNull<BoundMethod>;
 
 #[repr(u8)]
 pub enum ObjectKind {
@@ -27,6 +28,7 @@ pub enum ObjectKind {
     Upvalue,
     Class,
     Instance,
+    BoundMethod,
 }
 
 #[repr(C)]
@@ -52,10 +54,11 @@ pub enum ObjectRef<'a> {
     Function(&'a Function),
     NativeFunction(&'a NativeFunction),
     Closure(&'a Closure),
-    // upvalues might contain self-referential pointer, so we do not provide a reference
-    Upvalue(*const Upvalue),
+    // upvalues does not contain self-referencial pointer, so it's safe to return a reference
+    Upvalue(&'a Upvalue),
     Class(&'a Class),
     Instance(&'a Instance),
+    BoundMethod(&'a BoundMethod),
 }
 
 /// # Safety
@@ -83,7 +86,7 @@ pub unsafe fn as_ref<'a>(obj: RawObject) -> ObjectRef<'a> {
             }
             ObjectKind::Upvalue => {
                 let upvalue_ptr: *const Upvalue = obj.cast();
-                ObjectRef::Upvalue(upvalue_ptr)
+                ObjectRef::Upvalue(upvalue_ptr.as_ref().unwrap())
             }
             ObjectKind::Class => {
                 let class_ptr: *const Class = obj.cast();
@@ -92,6 +95,10 @@ pub unsafe fn as_ref<'a>(obj: RawObject) -> ObjectRef<'a> {
             ObjectKind::Instance => {
                 let instance_ptr: *const Instance = obj.cast();
                 ObjectRef::Instance(instance_ptr.as_ref().unwrap())
+            }
+            ObjectKind::BoundMethod => {
+                let bound_method_ptr: *const BoundMethod = obj.cast();
+                ObjectRef::BoundMethod(bound_method_ptr.as_ref().unwrap())
             }
         }
     }
@@ -166,6 +173,11 @@ pub unsafe fn blacken(obj: RawObject, worklist: &mut Vec<RawObject>) {
                     mark(key.into_raw_obj(), worklist);
                     value.mark(worklist);
                 }
+            }
+            ObjectKind::BoundMethod => {
+                let bound_method: *mut BoundMethod = ptr.cast();
+                (*bound_method).receiver.mark(worklist);
+                mark((*bound_method).method.cast(), worklist);
             }
         }
     }
@@ -453,5 +465,32 @@ impl Instance {
 
     pub fn fields_mut(&mut self) -> &mut Table {
         &mut self.fields
+    }
+}
+
+#[repr(C)]
+pub struct BoundMethod {
+    header: Header,
+    receiver: Value,
+    method: RawClosure,
+}
+
+impl HeapSize for BoundMethod {
+    fn heap_size(&self) -> usize {
+        0
+    }
+}
+
+impl BoundMethod {
+    pub(in crate::vm) fn new(receiver: Value, method: RawClosure) -> Self {
+        Self {
+            header: Header::new(ObjectKind::BoundMethod),
+            receiver,
+            method,
+        }
+    }
+
+    pub fn method(&self) -> RawClosure {
+        self.method
     }
 }

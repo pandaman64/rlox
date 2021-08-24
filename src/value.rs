@@ -62,6 +62,8 @@ pub unsafe fn format_obj<'obj>(obj: RawObject) -> ValueDisplay<'obj> {
         ObjectRef::Instance(instance) => {
             ValueDisplay::Instance(Value::Object(instance.class().cast()))
         }
+        // SAFETY: the object must be recursively valid.
+        ObjectRef::BoundMethod(method) => unsafe { format_obj(method.method().cast()) },
     }
 }
 

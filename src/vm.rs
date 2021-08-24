@@ -23,7 +23,9 @@ use object::{
     RawUpvalue, Str, Upvalue,
 };
 
-use self::object::{Class, Instance, RawClass, RawFunction, RawInstance};
+use self::object::{
+    BoundMethod, Class, Instance, RawBoundMethod, RawClass, RawFunction, RawInstance,
+};
 
 macro_rules! try_pop {
     ($self:ident, $variant:ident) => {{
@@ -194,6 +196,7 @@ impl Objects {
                 ObjectKind::Upvalue => free!(obj_ptr, Upvalue),
                 ObjectKind::Class => free!(obj_ptr, Class),
                 ObjectKind::Instance => free!(obj_ptr, Instance),
+                ObjectKind::BoundMethod => free!(obj_ptr, BoundMethod),
             }
 
             next
@@ -287,6 +290,20 @@ impl Objects {
         frames: &[CallFrame],
     ) -> RawClosure {
         let obj = self.allocate_object(closure, stack, frames, mark_nothing);
+        // SAFETY: obj points to a valid object
+        unsafe {
+            self.add_object_head(obj);
+        }
+        obj.cast()
+    }
+
+    fn allocate_bound_method(
+        &mut self,
+        bound_method: BoundMethod,
+        stack: &[Value],
+        frames: &[CallFrame],
+    ) -> RawBoundMethod {
+        let obj = self.allocate_object(bound_method, stack, frames, mark_nothing);
         // SAFETY: obj points to a valid object
         unsafe {
             self.add_object_head(obj);
@@ -622,6 +639,12 @@ impl<'w> Vm<'w> {
         )
     }
 
+    fn allocate_bound_method(&mut self, receiver: Value, method: RawClosure) -> RawBoundMethod {
+        let bound_method = BoundMethod::new(receiver, method);
+        self.objects
+            .allocate_bound_method(bound_method, &self.stack, &self.frames)
+    }
+
     fn allocate_class(&mut self, name: InternedStr) -> RawClass {
         let class = Class::new(name);
         self.objects
@@ -711,6 +734,22 @@ impl<'w> Vm<'w> {
         self.stack.push(Value::Object(cls_obj.cast()));
     }
 
+    fn push_frame(&mut self, closure: RawClosure, args: u8, bp: usize) -> bool {
+        // SAFETY: `function` is a reference to the function object derived by `closure.function`.
+        // since we assume that our GC keeps values reachable from the stack valid, accessing
+        // function is safe. moreover, the `function` reference dies before the later use of
+        // closure, which satisfies Stacked Borrows.
+        unsafe {
+            let function = closure.as_ref().function().as_ref();
+            if function.arity() != args {
+                eprintln!("Expected {} arguments but got {}.", function.arity(), args);
+                return false;
+            }
+        }
+        self.frames.push(CallFrame { closure, ip: 0, bp });
+        true
+    }
+
     pub fn call(&mut self, args: u8) -> bool {
         assert!(self.frames.len() < MAX_CALL_FRAME);
         let bp = self.stack.len() - usize::from(args) - 1;
@@ -728,25 +767,10 @@ impl<'w> Vm<'w> {
         // SAFETY: values in the stack are valid
         match unsafe { object::as_ref(callee) } {
             // call the given closure
-            ObjectRef::Closure(closure) => {
-                // SAFETY: `function` is a reference to the function object derived by `closure.function`.
-                // since we assume that our GC keeps values reachable from the stack valid, accessing
-                // function is safe. moreover, the `function` and `closure` references dies before
-                // the later use of callee, which satisfies Stacked Borrows.
-                unsafe {
-                    let function = closure.function().as_ref();
-                    if function.arity() != args {
-                        eprintln!("Expected {} arguments but got {}.", function.arity(), args);
-                        return false;
-                    }
-                }
-                self.frames.push(CallFrame {
-                    // make sure that `closure` will share the same permission as `callee`.
-                    closure: callee.cast(),
-                    ip: 0,
-                    bp,
-                });
-                true
+            ObjectRef::Closure(_closure) => self.push_frame(callee.cast(), args, bp),
+            // call the bound closure
+            ObjectRef::BoundMethod(bound_method) => {
+                self.push_frame(bound_method.method(), args, bp)
             }
             // call the given native function
             ObjectRef::NativeFunction(function) => {
@@ -811,6 +835,10 @@ impl<'w> Vm<'w> {
                 Err(InterpretResult::CompileError)
             }
         }
+    }
+
+    fn bind_method(&self, class: RawClass, method_name: Key) -> Option<Value> {
+        unsafe { class.as_ref().methods().get(method_name) }
     }
 
     /// # Safety
@@ -1149,6 +1177,26 @@ impl<'w> Vm<'w> {
                             // pop the instance
                             self.stack.pop();
                             self.stack.push(value);
+                        } else if let Some(method) =
+                            self.bind_method(instance.as_ref().class(), name)
+                        {
+                            match method {
+                                Value::Object(obj)
+                                    if matches!(object::as_ref(obj), ObjectRef::Closure(_)) =>
+                                {
+                                    let bound_method = self.allocate_bound_method(
+                                        Value::Object(instance.as_ref().class().cast()),
+                                        obj.cast(),
+                                    );
+                                    // pop the instance
+                                    self.stack.pop();
+                                    self.stack.push(Value::Object(bound_method.cast()));
+                                }
+                                _ => {
+                                    eprintln!("an instance must have closure as method");
+                                    return InterpretResult::CompileError;
+                                }
+                            }
                         } else {
                             eprintln!("Undefined property '{}'.", name.display());
                             return InterpretResult::RuntimeError;
