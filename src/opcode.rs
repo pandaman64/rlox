@@ -45,6 +45,7 @@ pub enum OpCode {
     Jump,
     JumpIfFalse,
     Call,
+    Invoke,
 }
 
 #[derive(Default)]
@@ -204,6 +205,21 @@ impl Chunk {
             Some(Jump) => trace_jump_code(self, offset, "OP_JUMP"),
             Some(JumpIfFalse) => trace_jump_code(self, offset, "OP_JUMP_IF_FALSE"),
             Some(Call) => trace_byte_code(self, offset, "OP_CALL"),
+            Some(Invoke) => {
+                let name_index = self.code[offset + 1];
+                let args = self.code[offset + 2];
+                let name = &self.constants[usize::from(name_index)];
+                // SAFETY: constants in this chunk are valid
+                eprintln!(
+                    "{:-16} ({} args) {:4} {}'",
+                    "OP_INVOKE",
+                    args,
+                    name_index,
+                    unsafe { name.format_args() }
+                );
+
+                offset + 3
+            }
         }
     }
 

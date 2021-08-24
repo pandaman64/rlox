@@ -554,22 +554,51 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 }
             },
             Expr::Call(expr) => {
-                self.gen_expr(vm, expr.function().unwrap());
-                let mut args = 0;
-                for arg in expr.args() {
-                    let position = arg.start();
-                    self.gen_expr(vm, arg);
-                    args += 1;
+                macro_rules! gen_args {
+                    () => {{
+                        let mut args = 0;
+                        for arg in expr.args() {
+                            let position = arg.start();
+                            self.gen_expr(vm, arg);
+                            args += 1;
 
-                    if args == 256 {
-                        self.errors
-                            .get_mut()
-                            .push(CodegenError::TooManyArguments { position });
-                        return;
+                            if args == 256 {
+                                self.errors
+                                    .get_mut()
+                                    .push(CodegenError::TooManyArguments { position });
+                                return;
+                            }
+                        }
+                        u8::try_from(args).unwrap()
+                    }};
+                }
+                let callee = expr.function().unwrap();
+                match callee {
+                    Expr::BinOp(binop) if binop.kind() == BinOpKind::Dot => {
+                        let mut operands = binop.operands();
+                        let receiver = operands.next().unwrap();
+                        let method = operands.next().unwrap();
+                        let ident = match method {
+                            Expr::Primary(Primary::Identifier(ident)) => ident,
+                            _ => unreachable!("non-identifier expression is used as method"),
+                        };
+
+                        self.gen_expr(vm, receiver);
+                        let args = gen_args!();
+                        let name = vm.allocate_string(ident.to_str().into(), self.mark());
+                        let index =
+                            self.push_constant(Value::Object(name.into_raw_obj()), ident.start());
+                        self.push_opcode(OpCode::Invoke, expr.start());
+                        self.push_u8(index, expr.start());
+                        self.push_u8(args, expr.start());
+                    }
+                    callee => {
+                        self.gen_expr(vm, callee);
+                        let args = gen_args!();
+                        self.push_opcode(OpCode::Call, expr.start());
+                        self.push_u8(args, expr.start());
                     }
                 }
-                self.push_opcode(OpCode::Call, expr.start());
-                self.push_u8(u8::try_from(args).unwrap(), expr.start());
             }
         }
     }

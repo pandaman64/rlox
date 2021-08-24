@@ -835,6 +835,60 @@ impl<'w> Vm<'w> {
         }
     }
 
+    fn invoke_from_class(
+        &mut self,
+        class: RawClass,
+        method_name: Key,
+        args: u8,
+        bp: usize,
+    ) -> bool {
+        // SAFETY: given values are valid
+        unsafe {
+            match class.as_ref().methods().get(method_name) {
+                None => {
+                    eprintln!("Undefined property '{}'.", method_name.display());
+                    false
+                }
+                Some(method) => match method {
+                    Value::Object(obj) if matches!(object::as_ref(obj), ObjectRef::Closure(_)) => {
+                        self.push_frame(obj.cast(), args, bp)
+                    }
+                    _ => {
+                        eprintln!("method must be a closure");
+                        false
+                    }
+                },
+            }
+        }
+    }
+
+    fn invoke(&mut self, method_name: Key, args: u8) -> bool {
+        assert!(self.frames.len() < MAX_CALL_FRAME);
+        let bp = self.stack.len() - usize::from(args) - 1;
+
+        let receiver = self.stack[bp].clone();
+        // SAFETY: values in the stack are valid
+        unsafe {
+            match receiver {
+                Value::Object(obj) if matches!(object::as_ref(obj), ObjectRef::Instance(_)) => {
+                    let instance: RawInstance = obj.cast();
+
+                    if let Some(method) = instance.as_ref().fields().get(method_name) {
+                        self.stack[bp] = method;
+                        return self.call(args);
+                    }
+
+                    let class = instance.as_ref().class();
+                    self.invoke_from_class(class, method_name, args, bp)
+                }
+                _ => {
+                    eprintln!("Only instances have methods.");
+                    false
+                }
+            }
+        }
+    }
+
     pub fn print<M: fmt::Display>(&mut self, message: M) -> io::Result<()> {
         write!(self.stdout, "{}", message)
     }
@@ -1412,6 +1466,25 @@ impl<'w> Vm<'w> {
                         return InterpretResult::RuntimeError;
                     }
                     if !self.call(args) {
+                        return InterpretResult::RuntimeError;
+                    }
+                }
+                Some(Invoke) => {
+                    let method_name = match extract_constant_key(&mut frame.ip, chunk) {
+                        Some(key) => key,
+                        None => {
+                            eprintln!("OP_INVOKE takes a string constant");
+                            return InterpretResult::CompileError;
+                        }
+                    };
+                    let args = function.chunk().code()[frame.ip];
+                    frame.ip += 1;
+
+                    if self.frames.len() == MAX_CALL_FRAME {
+                        eprintln!("Stack overflow.");
+                        return InterpretResult::RuntimeError;
+                    }
+                    if !self.invoke(method_name, args) {
                         return InterpretResult::RuntimeError;
                     }
                 }
