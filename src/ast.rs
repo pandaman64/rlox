@@ -574,6 +574,10 @@ impl ClassDecl {
     pub fn ident(&self) -> Option<Identifier> {
         self.inner.children_with_tokens().find_map(try_as_ident)
     }
+
+    pub fn methods(&self) -> impl Iterator<Item = FunDecl> {
+        self.inner.children().filter_map(FunDecl::cast)
+    }
 }
 
 #[derive(Debug)]

@@ -384,6 +384,18 @@ where
         }
     }
 
+    fn parse_function_name_and_body(&mut self) {
+        use SyntaxKind::*;
+
+        self.expect(IdentifierToken);
+        self.expect(ParenOpenToken);
+        self.builder.start_node(FunParamsNode.into());
+        self.parse_comma_separated(ParenCloseToken, |this| this.expect(IdentifierToken));
+        self.builder.finish_node();
+        self.expect(ParenCloseToken);
+        self.parse_block_stmt();
+    }
+
     fn parse_decl(&mut self) {
         use SyntaxKind::*;
 
@@ -406,15 +418,7 @@ where
                     FunToken => {
                         self.builder.start_node(FunDeclNode.into());
                         self.bump();
-                        self.expect(IdentifierToken);
-                        self.expect(ParenOpenToken);
-                        self.builder.start_node(FunParamsNode.into());
-                        self.parse_comma_separated(ParenCloseToken, |this| {
-                            this.expect(IdentifierToken)
-                        });
-                        self.builder.finish_node();
-                        self.expect(ParenCloseToken);
-                        self.parse_block_stmt();
+                        self.parse_function_name_and_body();
                         self.builder.finish_node();
                     }
                     ClassToken => {
@@ -423,8 +427,18 @@ where
 
                         // class name
                         self.expect(IdentifierToken);
-
                         self.expect(BraceOpenToken);
+                        loop {
+                            match self.peek() {
+                                None | Some(BraceCloseToken) => break,
+                                _ => {
+                                    // method declaration
+                                    self.builder.start_node(FunDeclNode.into());
+                                    self.parse_function_name_and_body();
+                                    self.builder.finish_node();
+                                }
+                            }
+                        }
                         self.expect(BraceCloseToken);
 
                         self.builder.finish_node();

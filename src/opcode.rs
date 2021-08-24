@@ -19,6 +19,7 @@ pub enum OpCode {
     Constant,
     Closure,
     Class,
+    Method,
     Pop,
     CloseUpvalue,
     Negate,
@@ -127,6 +128,7 @@ impl Chunk {
                 eprintln!("{:-16} {:4} '{}'", "OP_CLOSURE", constant_index, unsafe {
                     constant.format_args()
                 });
+                offset += 1;
 
                 // SAFETY: constants and generated code are valid
                 unsafe {
@@ -134,12 +136,12 @@ impl Chunk {
                         Value::Object(obj) => match object::as_ref(*obj) {
                             ObjectRef::Function(function) => {
                                 for _ in 0..function.upvalues() {
-                                    let is_local = if self.code[offset + 1] > 0 {
+                                    let is_local = if self.code[offset] > 0 {
                                         "local"
                                     } else {
                                         "upvalue"
                                     };
-                                    let index = self.code[offset + 2];
+                                    let index = self.code[offset + 1];
                                     eprintln!(
                                         "{:04}    |                     {} {}",
                                         offset, index, is_local,
@@ -157,6 +159,10 @@ impl Chunk {
             Some(Class) => {
                 // SAFETY: constants in this chunk are valid
                 unsafe { trace_constant_code(self, offset, "OP_CLASS") }
+            }
+            Some(Method) => {
+                // SAFETY: constants in this chunk are valid
+                unsafe { trace_constant_code(self, offset, "OP_METHOD") }
             }
             Some(Pop) => trace_simple_code(offset, "OP_POP"),
             Some(CloseUpvalue) => trace_simple_code(offset, "OP_CLOSE_UPVALUE"),

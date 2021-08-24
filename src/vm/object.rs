@@ -154,6 +154,10 @@ pub unsafe fn blacken(obj: RawObject, worklist: &mut Vec<RawObject>) {
             ObjectKind::Class => {
                 let class: *mut Class = ptr.cast();
                 mark((*class).name.into_raw_obj().cast(), worklist);
+                for (key, value) in (*class).methods.iter() {
+                    mark(key.into_raw_obj(), worklist);
+                    value.mark(worklist);
+                }
             }
             ObjectKind::Instance => {
                 let instance: *mut Instance = ptr.cast();
@@ -386,6 +390,7 @@ impl Upvalue {
 pub struct Class {
     header: Header,
     name: InternedStr,
+    methods: Table,
 }
 
 impl HeapSize for Class {
@@ -399,11 +404,20 @@ impl Class {
         Self {
             header: Header::new(ObjectKind::Class),
             name,
+            methods: Table::new(),
         }
     }
 
     pub fn name(&self) -> InternedStr {
         self.name
+    }
+
+    pub fn methods(&self) -> &Table {
+        &self.methods
+    }
+
+    pub fn methods_mut(&mut self) -> &mut Table {
+        &mut self.methods
     }
 }
 

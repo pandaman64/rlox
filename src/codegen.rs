@@ -5,7 +5,8 @@ use std::{
 
 use crate::{
     ast::{
-        BinOpKind, BlockStmt, Decl, Expr, ForInit, Identifier, Primary, Stmt, UnaryOpKind, VarDecl,
+        BinOpKind, BlockStmt, Decl, Expr, ForInit, FunDecl, Identifier, Primary, Stmt, UnaryOpKind,
+        VarDecl,
     },
     line_map::LineMap,
     opcode::{ChunkBuilder, OpCode},
@@ -728,6 +729,38 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         );
     }
 
+    fn gen_closure(
+        decl: FunDecl,
+        name: InternedStr,
+        arity: u8,
+    ) -> impl FnOnce(&mut Compiler<'parent, 'map>, &mut Vm<'_>) -> usize {
+        move |this, vm| {
+            let mut compiler =
+                Compiler::new_function(this, name, arity, this.line_map, decl.return_position());
+            compiler.begin_block();
+            for param in decl.params() {
+                compiler.push_local(param);
+                compiler.locals.last_mut().unwrap().depth = compiler.block_depth;
+            }
+            compiler.gen_block_stmt(vm, decl.body().unwrap(), false);
+            compiler.end_block(decl.start());
+            let (fun_obj, upvalues, errors) = compiler.finish(vm).unwrap();
+            this.errors.get_mut().extend(errors);
+
+            let index = this.push_constant(Value::Object(fun_obj.cast()), decl.start());
+            this.push_opcode(OpCode::Closure, decl.start());
+            this.push_u8(index, decl.start());
+
+            for upvalue in upvalues.iter() {
+                let is_local = if upvalue.is_local { 1 } else { 0 };
+                this.push_u8(is_local, decl.start());
+                this.push_u8(upvalue.index, decl.start());
+            }
+
+            decl.start()
+        }
+    }
+
     pub fn gen_decl(&mut self, vm: &mut Vm<'_>, decl: Decl) {
         self.return_position = Some(decl.return_position());
 
@@ -754,36 +787,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 self.define_variable(
                     vm,
                     ident,
-                    move |this, vm| {
-                        let mut compiler = Compiler::new_function(
-                            this,
-                            name,
-                            arity,
-                            this.line_map,
-                            decl.return_position(),
-                        );
-                        compiler.begin_block();
-                        for param in decl.params() {
-                            compiler.push_local(param);
-                            compiler.locals.last_mut().unwrap().depth = compiler.block_depth;
-                        }
-                        compiler.gen_block_stmt(vm, decl.body().unwrap(), false);
-                        compiler.end_block(decl.start());
-                        let (fun_obj, upvalues, errors) = compiler.finish(vm).unwrap();
-                        this.errors.get_mut().extend(errors);
-
-                        let index = this.push_constant(Value::Object(fun_obj.cast()), decl.start());
-                        this.push_opcode(OpCode::Closure, decl.start());
-                        this.push_u8(index, decl.start());
-
-                        for upvalue in upvalues.iter() {
-                            let is_local = if upvalue.is_local { 1 } else { 0 };
-                            this.push_u8(is_local, decl.start());
-                            this.push_u8(upvalue.index, decl.start());
-                        }
-
-                        decl.start()
-                    },
+                    Self::gen_closure(decl, name, arity),
                     // functions can refer to themselves inside their body because they are executed
                     // only after the initialization.
                     true,
@@ -802,8 +806,8 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
                 self.define_variable(
                     vm,
-                    ident,
-                    move |this, _vm| {
+                    ident.clone(),
+                    |this, _vm| {
                         let index =
                             this.push_constant(Value::Object(name.into_raw_obj()), decl.start());
                         this.push_opcode(OpCode::Class, decl.start());
@@ -815,6 +819,37 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 );
 
                 vm.pop();
+
+                let (get_op, _set_op, index) = self.resolve(vm, ident);
+                self.push_opcode(get_op, decl.start());
+                self.push_u8(index, decl.start());
+                for method in decl.methods() {
+                    let ident = method.ident().unwrap();
+                    let method_name = vm.allocate_string(ident.to_str().into(), self.mark());
+                    let arity = match u8::try_from(method.params().count()) {
+                        Ok(arity) => arity,
+                        Err(_) => {
+                            let ident = method.params().nth(255).unwrap();
+                            self.errors.get_mut().push(CodegenError::TooManyParameters {
+                                position: ident.start(),
+                            });
+                            continue;
+                        }
+                    };
+                    let method_position = method.start();
+
+                    // register method_name as GC root
+                    vm.push(Value::Object(method_name.into_raw_obj()));
+
+                    Self::gen_closure(method, method_name, arity)(self, vm);
+                    let index = self
+                        .push_constant(Value::Object(method_name.into_raw_obj()), method_position);
+                    self.push_opcode(OpCode::Method, method_position);
+                    self.push_u8(index, method_position);
+
+                    vm.pop();
+                }
+                self.push_opcode(OpCode::Pop, decl.return_position());
             }
             Decl::Stmt(stmt) => self.gen_stmt(vm, stmt),
         }

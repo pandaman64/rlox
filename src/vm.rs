@@ -782,6 +782,37 @@ impl<'w> Vm<'w> {
         self.stdout.flush()
     }
 
+    fn define_method(&mut self, method_name: Key) -> Result<(), InterpretResult> {
+        match &self.stack[self.stack.len().saturating_sub(2)..] {
+            [class, method] => match class {
+                // SAFETY: values in the stack are valid
+                Value::Object(obj)
+                    if matches!(unsafe { object::as_ref(*obj) }, ObjectRef::Class(_)) =>
+                {
+                    unsafe {
+                        let mut class: RawClass = obj.cast();
+                        class.as_mut().methods_mut().insert(
+                            &mut self.objects.allocated,
+                            method_name,
+                            method.clone(),
+                        );
+                        // pop method
+                        self.stack.pop();
+                        Ok(())
+                    }
+                }
+                _ => {
+                    eprintln!("OP_METHOD must take a class");
+                    Err(InterpretResult::CompileError)
+                }
+            },
+            _ => {
+                eprintln!("not enough stack for OP_METHOD");
+                Err(InterpretResult::CompileError)
+            }
+        }
+    }
+
     /// # Safety
     /// stack and frames must be valid
     pub unsafe fn print_stack_trace(&self) {
@@ -937,6 +968,7 @@ impl<'w> Vm<'w> {
                     }
                 },
                 Some(Class) => {
+                    // TODO: use extract_constant_key
                     let name = extract_constant(&mut frame.ip, chunk);
                     match name {
                         // SAFETY: name is a valid object
@@ -958,6 +990,12 @@ impl<'w> Vm<'w> {
                             eprintln!("class name must be a string.");
                             return InterpretResult::CompileError;
                         }
+                    }
+                }
+                Some(Method) => {
+                    let method_name = extract_constant_key(&mut frame.ip, chunk).unwrap();
+                    if let Err(e) = self.define_method(method_name) {
+                        return e;
                     }
                 }
                 Some(DefineGlobal) => {
