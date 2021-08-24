@@ -66,6 +66,10 @@ impl Key {
         Self(s.0)
     }
 
+    pub fn into_interned_str(self) -> InternedStr {
+        InternedStr(self.0)
+    }
+
     pub fn into_raw_obj(self) -> RawObject {
         self.0.cast()
     }

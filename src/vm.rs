@@ -968,32 +968,24 @@ impl<'w> Vm<'w> {
                     }
                 },
                 Some(Class) => {
-                    // TODO: use extract_constant_key
-                    let name = extract_constant(&mut frame.ip, chunk);
-                    match name {
-                        // SAFETY: name is a valid object
-                        Value::Object(name) => unsafe {
-                            match object::as_ref(name) {
-                                ObjectRef::Str(_) => {
-                                    // SAFETY: name is a valid string
-                                    let name = InternedStr::new(name.cast());
-                                    let class = self.allocate_class(name);
-                                    self.stack.push(Value::Object(class.cast()))
-                                }
-                                _ => {
-                                    eprintln!("class name must be a string.");
-                                    return InterpretResult::CompileError;
-                                }
-                            }
-                        },
-                        _ => {
-                            eprintln!("class name must be a string.");
+                    let name = match extract_constant_key(&mut frame.ip, chunk) {
+                        Some(key) => key,
+                        None => {
+                            eprintln!("OP_CLASS takes a string constant");
                             return InterpretResult::CompileError;
                         }
-                    }
+                    };
+                    let class = self.allocate_class(name.into_interned_str());
+                    self.stack.push(Value::Object(class.cast()));
                 }
                 Some(Method) => {
-                    let method_name = extract_constant_key(&mut frame.ip, chunk).unwrap();
+                    let method_name = match extract_constant_key(&mut frame.ip, chunk) {
+                        Some(key) => key,
+                        None => {
+                            eprintln!("OP_METHOD takes a string constant");
+                            return InterpretResult::CompileError;
+                        }
+                    };
                     if let Err(e) = self.define_method(method_name) {
                         return e;
                     }
