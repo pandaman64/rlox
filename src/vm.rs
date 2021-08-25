@@ -1067,7 +1067,7 @@ impl<'w> Vm<'w> {
                         .function()
                         .as_ref();
                     let chunk = function.chunk();
-                    for (i, upvalue) in cls.upvalues_mut().iter_mut().enumerate() {
+                    for upvalue in cls.upvalues_mut().iter_mut() {
                         let frame = self.frames.last_mut().unwrap();
                         let is_local = chunk.code()[frame.ip];
                         let index = chunk.code()[frame.ip + 1];
@@ -1081,7 +1081,7 @@ impl<'w> Vm<'w> {
                                 Ok(upvalue) => Some(upvalue),
                             }
                         } else {
-                            frame.closure.as_ref().upvalues()[i]
+                            frame.closure.as_ref().upvalues()[usize::from(index)]
                         };
                         *upvalue = upvalue_obj;
                     }

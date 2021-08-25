@@ -12,6 +12,7 @@ use crate::{
     line_map::LineMap,
     opcode::{ChunkBuilder, OpCode},
     table::InternedStr,
+    trace_available,
     value::Value,
     vm::{
         object::{self, RawFunction, RawObject},
@@ -186,6 +187,13 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         // set chunk after allocating function so that constants in the chunk will be marked by self.mark()
         unsafe {
             vm.set_chunk(function, self.chunk_builder.take());
+        }
+
+        if trace_available() {
+            // SAFETY: we constructed a valid function
+            unsafe {
+                function.as_ref().trace();
+            }
         }
 
         Some((

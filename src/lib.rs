@@ -362,8 +362,6 @@ pub fn run<W: Write>(input: &str, mut stdout: W) -> Result<(), Error> {
             return Err(Error::Codegen);
         }
         assert!(upvalues.is_empty());
-        // SAFETY: compiler returns a valid function
-        function.as_ref().trace();
 
         vm.reset(function);
         vm.call(0);

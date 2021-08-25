@@ -218,7 +218,7 @@ impl Chunk {
                 let name = &self.constants[usize::from(name_index)];
                 // SAFETY: constants in this chunk are valid
                 eprintln!(
-                    "{:-16} ({} args) {:4} {}'",
+                    "{:-16} ({} args) {:4} '{}'",
                     "OP_INVOKE",
                     args,
                     name_index,

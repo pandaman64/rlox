@@ -81,8 +81,6 @@ fn repl<R: BufRead>(mut input: R) -> Result<(), rlox::Error> {
                 continue;
             }
             assert!(upvalues.is_empty());
-            // SAFETY: compiler returns a valid function
-            function.as_ref().trace();
 
             vm.reset(function);
             vm.call(0);
