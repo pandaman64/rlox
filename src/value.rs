@@ -2,8 +2,7 @@ use core::fmt;
 
 use crate::vm::object::{self, ObjectRef, RawObject};
 
-// we intentionally omit Copy so that cloning values is more explicit
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Value {
     Nil,
     Bool(bool),

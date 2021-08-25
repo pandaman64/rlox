@@ -491,7 +491,7 @@ impl BoundMethod {
     }
 
     pub fn receiver(&self) -> Value {
-        self.receiver.clone()
+        self.receiver
     }
 
     pub fn method(&self) -> RawClosure {

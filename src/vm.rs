@@ -416,7 +416,7 @@ impl Objects {
                 }
 
                 let head = head.as_mut();
-                let value = stack[head.stack_index()].clone();
+                let value = stack[head.stack_index()];
                 head.close(value);
                 self.open_upvalues_head = head.next();
             }
@@ -575,7 +575,7 @@ pub struct Vm<'w> {
 fn extract_constant(ip: &mut usize, chunk: &Chunk) -> Value {
     let index = usize::from(chunk.code()[*ip]);
     *ip += 1;
-    chunk.constants()[index].clone()
+    chunk.constants()[index]
 }
 
 fn extract_constant_key(ip: &mut usize, chunk: &Chunk) -> Option<Key> {
@@ -866,7 +866,7 @@ impl<'w> Vm<'w> {
         assert!(self.frames.len() < MAX_CALL_FRAME);
         let bp = self.stack.len() - usize::from(args) - 1;
 
-        let receiver = self.stack[bp].clone();
+        let receiver = self.stack[bp];
         // SAFETY: values in the stack are valid
         unsafe {
             match receiver {
@@ -909,7 +909,7 @@ impl<'w> Vm<'w> {
                         class.as_mut().methods_mut().insert(
                             &mut self.objects.allocated,
                             method_name,
-                            method.clone(),
+                            *method,
                         );
                         // pop method
                         self.stack.pop();
@@ -1137,7 +1137,7 @@ impl<'w> Vm<'w> {
                                         subclass.as_mut().methods_mut().insert(
                                             &mut self.objects.allocated,
                                             *name,
-                                            method.clone(),
+                                            *method,
                                         );
                                     }
                                     // pop subclass
@@ -1171,7 +1171,7 @@ impl<'w> Vm<'w> {
                         Some(value) => {
                             objects
                                 .globals
-                                .insert(&mut objects.allocated, key, value.clone());
+                                .insert(&mut objects.allocated, key, *value);
                         }
                     }
                     // we pop the value after inserting to globals table so that we can run GC
@@ -1194,7 +1194,7 @@ impl<'w> Vm<'w> {
                             return InterpretResult::RuntimeError;
                         }
                     };
-                    self.stack.push(value.clone());
+                    self.stack.push(value);
                 }
                 Some(SetGlobal) => {
                     let key = match extract_constant_key(&mut frame.ip, chunk) {
@@ -1218,7 +1218,7 @@ impl<'w> Vm<'w> {
                                     return InterpretResult::RuntimeError;
                                 }
                                 Entry::Occupied(mut o) => {
-                                    o.insert(value.clone());
+                                    o.insert(*value);
                                 }
                             }
                             let new_size = objects.globals.heap_size();
@@ -1229,7 +1229,7 @@ impl<'w> Vm<'w> {
                 Some(GetLocal) => {
                     let local = frame.bp + usize::from(chunk.code()[frame.ip]);
                     frame.ip += 1;
-                    self.stack.push(self.stack[local].clone());
+                    self.stack.push(self.stack[local]);
                 }
                 Some(SetLocal) => {
                     let local = frame.bp + usize::from(chunk.code()[frame.ip]);
@@ -1252,10 +1252,10 @@ impl<'w> Vm<'w> {
                         let upvalue = frame.closure.as_ref().upvalues()[index].unwrap();
                         let stack_index = upvalue.as_ref().stack_index();
                         if stack_index < usize::MAX {
-                            let value = self.stack[stack_index].clone();
+                            let value = self.stack[stack_index];
                             self.stack.push(value);
                         } else {
-                            let value = upvalue.as_ref().closed_value().clone();
+                            let value = *upvalue.as_ref().closed_value();
                             self.stack.push(value);
                         }
                     }
@@ -1268,7 +1268,7 @@ impl<'w> Vm<'w> {
                         let mut upvalue = frame.closure.as_ref().upvalues()[index].unwrap();
                         let stack_index = upvalue.as_ref().stack_index();
                         let top = match self.stack.last() {
-                            Some(top) => top.clone(),
+                            Some(top) => *top,
                             None => {
                                 eprintln!("not enough stack for OP_SET_UPVALUE");
                                 return InterpretResult::RuntimeError;
@@ -1310,7 +1310,7 @@ impl<'w> Vm<'w> {
                         };
 
                         if let Some(value) = instance.as_ref().fields().get(name) {
-                            let value = value.clone();
+                            let value = value;
                             // pop the instance
                             self.stack.pop();
                             self.stack.push(value);
@@ -1374,7 +1374,7 @@ impl<'w> Vm<'w> {
                                 instance.as_mut().fields_mut().insert(
                                     &mut objects.allocated,
                                     name,
-                                    value.clone(),
+                                    *value,
                                 );
 
                                 let value = self.stack.pop().unwrap();
@@ -1390,7 +1390,7 @@ impl<'w> Vm<'w> {
                         // SAFETY: values in the stack are valid
                         [this, super_class] => unsafe {
                             // the compiler ensures that `this` is the receiver
-                            let this = this.clone();
+                            let this = *this;
                             let method_name = match extract_constant_key(&mut frame.ip, chunk) {
                                 Some(key) => key,
                                 None => {
