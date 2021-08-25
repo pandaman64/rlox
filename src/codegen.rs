@@ -6,8 +6,8 @@ use std::{
 
 use crate::{
     ast::{
-        BinOpKind, BlockStmt, Decl, Expr, ForInit, FunDecl, Identifier, Primary, Stmt, UnaryOpKind,
-        VarDecl,
+        BinOpKind, BlockStmt, Decl, Expr, ForInit, FunDecl, Identifier, Primary, Stmt,
+        SuperMethodExpr, UnaryOpKind, VarDecl,
     },
     line_map::LineMap,
     opcode::{ChunkBuilder, OpCode},
@@ -413,6 +413,28 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         }
     }
 
+    fn check_super(&mut self, expr: &SuperMethodExpr) -> bool {
+        match &self.current_class {
+            None => {
+                self.errors.get_mut().push(CodegenError::SuperOutsideClass {
+                    position: expr.start(),
+                });
+                return false;
+            }
+            Some(current_class) => {
+                if !current_class.has_super_class.get() {
+                    self.errors
+                        .get_mut()
+                        .push(CodegenError::SuperWithoutSuperClass {
+                            position: expr.start(),
+                        });
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     fn gen_expr(&mut self, vm: &mut Vm<'_>, expr: Expr) {
         match expr {
             Expr::ParenExpr(expr) => {
@@ -604,6 +626,30 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         self.push_u8(index, expr.start());
                         self.push_u8(args, expr.start());
                     }
+                    Expr::SuperMethod(super_method) => {
+                        if !self.check_super(&super_method) {
+                            return;
+                        }
+
+                        {
+                            let (get_op, _set_op, index) = self.resolve(vm, "this", expr.start());
+                            self.push_opcode(get_op, expr.start());
+                            self.push_u8(index, expr.start());
+                        }
+                        let args = gen_args!();
+                        {
+                            let (get_op, _set_op, index) = self.resolve(vm, "super", expr.start());
+                            self.push_opcode(get_op, expr.start());
+                            self.push_u8(index, expr.start());
+                        }
+                        let method_name = super_method.method_name().unwrap();
+                        let name = vm.allocate_string(method_name.to_str().into(), self.mark());
+                        let index = self
+                            .push_constant(Value::Object(name.into_raw_obj()), method_name.start());
+                        self.push_opcode(OpCode::SuperInvoke, expr.start());
+                        self.push_u8(index, expr.start());
+                        self.push_u8(args, expr.start());
+                    }
                     callee => {
                         self.gen_expr(vm, callee);
                         let args = gen_args!();
@@ -613,24 +659,10 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 }
             }
             Expr::SuperMethod(expr) => {
-                match &self.current_class {
-                    None => {
-                        self.errors.get_mut().push(CodegenError::SuperOutsideClass {
-                            position: expr.start(),
-                        });
-                        return;
-                    }
-                    Some(current_class) => {
-                        if !current_class.has_super_class.get() {
-                            self.errors
-                                .get_mut()
-                                .push(CodegenError::SuperWithoutSuperClass {
-                                    position: expr.start(),
-                                });
-                            return;
-                        }
-                    }
+                if !self.check_super(&expr) {
+                    return;
                 }
+
                 {
                     let (get_op, _set_op, index) = self.resolve(vm, "this", expr.start());
                     self.push_opcode(get_op, expr.start());

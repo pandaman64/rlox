@@ -48,6 +48,7 @@ pub enum OpCode {
     JumpIfFalse,
     Call,
     Invoke,
+    SuperInvoke,
 }
 
 #[derive(Default)]
@@ -101,7 +102,16 @@ impl Chunk {
         Self::default()
     }
 
-    // I don't know why only this function triggers clippy warning about missing SAFETY section
+    fn trace_invoke_code(&self, offset: usize, s: &str) -> usize {
+        let name_index = self.code[offset + 1];
+        let args = self.code[offset + 2];
+        let name = &self.constants[usize::from(name_index)];
+        eprintln!("{:-16} ({} args) {:4} '{}'", s, args, name_index, unsafe {
+            name.format_args()
+        });
+        offset + 3
+    }
+
     /// # Safety
     ///
     /// constants in this chunk must be valid
@@ -212,21 +222,8 @@ impl Chunk {
             Some(Jump) => trace_jump_code(self, offset, "OP_JUMP"),
             Some(JumpIfFalse) => trace_jump_code(self, offset, "OP_JUMP_IF_FALSE"),
             Some(Call) => trace_byte_code(self, offset, "OP_CALL"),
-            Some(Invoke) => {
-                let name_index = self.code[offset + 1];
-                let args = self.code[offset + 2];
-                let name = &self.constants[usize::from(name_index)];
-                // SAFETY: constants in this chunk are valid
-                eprintln!(
-                    "{:-16} ({} args) {:4} '{}'",
-                    "OP_INVOKE",
-                    args,
-                    name_index,
-                    unsafe { name.format_args() }
-                );
-
-                offset + 3
-            }
+            Some(Invoke) => self.trace_invoke_code(offset, "OP_INVOKE"),
+            Some(SuperInvoke) => self.trace_invoke_code(offset, "OP_SUPER_INVOKE"),
         }
     }
 

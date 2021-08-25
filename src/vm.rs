@@ -1587,6 +1587,49 @@ impl<'w> Vm<'w> {
                         return InterpretResult::RuntimeError;
                     }
                 }
+                Some(SuperInvoke) => {
+                    let method_name = match extract_constant_key(&mut frame.ip, chunk) {
+                        Some(key) => key,
+                        None => {
+                            eprintln!("OP_INVOKE takes a string constant");
+                            return InterpretResult::CompileError;
+                        }
+                    };
+                    let args = function.chunk().code()[frame.ip];
+                    frame.ip += 1;
+
+                    let super_class = match self.stack.last() {
+                        None => {
+                            eprintln!("no stack for OP_SUPER_INVOKE");
+                            return InterpretResult::CompileError;
+                        }
+                        Some(v) => match v {
+                            // SAFETY: values in the stack are valid
+                            Value::Object(obj)
+                                if matches!(
+                                    unsafe { object::as_ref(*obj) },
+                                    ObjectRef::Class(_)
+                                ) =>
+                            {
+                                obj.cast()
+                            }
+                            _ => {
+                                eprintln!("OP_SUPER_INVOKE takes a super class");
+                                return InterpretResult::CompileError;
+                            }
+                        },
+                    };
+                    self.stack.pop();
+                    let bp = self.stack.len() - usize::from(args) - 1;
+
+                    if self.frames.len() == MAX_CALL_FRAME {
+                        eprintln!("Stack overflow.");
+                        return InterpretResult::RuntimeError;
+                    }
+                    if !self.invoke_from_class(super_class, method_name, args, bp) {
+                        return InterpretResult::RuntimeError;
+                    }
+                }
             }
         }
     }
