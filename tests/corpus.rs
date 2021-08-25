@@ -1,6 +1,6 @@
 use std::process::Command;
 
-const TEST: &str = "chap29_superclasses";
+const TEST: &str = "chap30_optimization";
 
 #[test]
 fn test_corpus() {
