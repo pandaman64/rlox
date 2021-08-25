@@ -99,3 +99,27 @@ scone.topping();"#;
     run(input, &mut output).unwrap();
     assert_eq!(output, b"scone with berries and cream\n");
 }
+
+#[test]
+fn test_inherit() {
+    let input = r#"
+class Super {
+    foo() {
+        print "foo";
+    }
+}
+
+class Sub < Super {
+    bar() {
+        this.foo();
+        print "bar";
+    }
+}
+
+var sub = Sub();
+sub.bar();"#;
+    std::env::set_var("RUST_LOG", "trace");
+    let mut output = vec![];
+    run(input, &mut output).unwrap();
+    assert_eq!(output, b"foo\nbar\n");
+}

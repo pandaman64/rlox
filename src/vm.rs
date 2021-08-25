@@ -1109,6 +1109,52 @@ impl<'w> Vm<'w> {
                         return e;
                     }
                 }
+                Some(Inherit) => {
+                    match &self.stack[self.stack.len().saturating_sub(2)..] {
+                        // SAFETY: values in the stack are valid
+                        [super_class, subclass] => unsafe {
+                            match super_class {
+                                Value::Object(obj)
+                                    if matches!(object::as_ref(*obj), ObjectRef::Class(_)) =>
+                                {
+                                    let super_class: RawClass = obj.cast();
+                                    let mut subclass: RawClass = match subclass {
+                                        Value::Object(obj)
+                                            if matches!(
+                                                object::as_ref(*obj),
+                                                ObjectRef::Class(_)
+                                            ) =>
+                                        {
+                                            obj.cast()
+                                        }
+                                        _ => {
+                                            eprintln!("subclass is not a class");
+                                            return InterpretResult::CompileError;
+                                        }
+                                    };
+
+                                    for (name, method) in super_class.as_ref().methods().iter() {
+                                        subclass.as_mut().methods_mut().insert(
+                                            &mut self.objects.allocated,
+                                            *name,
+                                            method.clone(),
+                                        );
+                                    }
+                                    // pop subclass
+                                    self.stack.pop();
+                                }
+                                _ => {
+                                    eprintln!("Superclass must be a class.");
+                                    return InterpretResult::RuntimeError;
+                                }
+                            }
+                        },
+                        _ => {
+                            eprintln!("OP_INHERIT takes super class and subclass");
+                            return InterpretResult::CompileError;
+                        }
+                    }
+                }
                 Some(DefineGlobal) => {
                     let key = match extract_constant_key(&mut frame.ip, chunk) {
                         Some(key) => key,
@@ -1337,6 +1383,59 @@ impl<'w> Vm<'w> {
                             }
                         }
                         _ => unreachable!(),
+                    }
+                }
+                Some(GetSuper) => {
+                    match &self.stack[self.stack.len().saturating_sub(2)..] {
+                        // SAFETY: values in the stack are valid
+                        [this, super_class] => unsafe {
+                            // the compiler ensures that `this` is the receiver
+                            let this = this.clone();
+                            let method_name = match extract_constant_key(&mut frame.ip, chunk) {
+                                Some(key) => key,
+                                None => {
+                                    eprintln!("OP_SET_PROPERTY takes a string constant");
+                                    return InterpretResult::CompileError;
+                                }
+                            };
+
+                            let super_class: RawClass = match super_class {
+                                Value::Object(obj)
+                                    if matches!(object::as_ref(*obj), ObjectRef::Class(_)) =>
+                                {
+                                    obj.cast()
+                                }
+                                _ => {
+                                    eprintln!("OP_SET_PROPERTY requires a super class");
+                                    return InterpretResult::CompileError;
+                                }
+                            };
+
+                            if let Some(method) = self.bind_method(super_class, method_name) {
+                                match method {
+                                    Value::Object(obj)
+                                        if matches!(object::as_ref(obj), ObjectRef::Closure(_)) =>
+                                    {
+                                        let bound_method =
+                                            self.allocate_bound_method(this, obj.cast());
+                                        // pop the instance
+                                        self.stack.pop();
+                                        self.stack.push(Value::Object(bound_method.cast()));
+                                    }
+                                    _ => {
+                                        eprintln!("an instance must have closure as method");
+                                        return InterpretResult::CompileError;
+                                    }
+                                }
+                            } else {
+                                eprintln!("Undefined property '{}'.", method_name.display());
+                                return InterpretResult::RuntimeError;
+                            }
+                        },
+                        _ => {
+                            eprintln!("not enough stack for OP_GET_SUPER");
+                            return InterpretResult::CompileError;
+                        }
                     }
                 }
                 Some(Pop) => match self.stack.pop() {

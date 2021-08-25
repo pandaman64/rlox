@@ -108,6 +108,7 @@ pub enum SyntaxKind {
     PrimaryExprNode,
     ArgsNode,
     CallExprNode,
+    SuperMethodExprNode,
     ExprNode,
 
     // declarations

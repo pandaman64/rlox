@@ -207,6 +207,13 @@ where
                         self.expect(ParenCloseToken);
                         self.builder.finish_node();
                     }
+                    SuperToken => {
+                        self.builder.start_node(SuperMethodExprNode.into());
+                        self.bump();
+                        self.expect(DotToken);
+                        self.expect(IdentifierToken);
+                        self.builder.finish_node();
+                    }
                     IdentifierToken | StringLiteralToken | NumberToken | NilToken | TrueToken
                     | FalseToken | ThisToken => {
                         self.builder.start_node(PrimaryExprNode.into());
@@ -430,6 +437,11 @@ where
 
                         // class name
                         self.expect(IdentifierToken);
+                        // superclass
+                        if self.peek() == Some(LessToken) {
+                            self.bump();
+                            self.expect(IdentifierToken);
+                        }
                         self.expect(BraceOpenToken);
                         loop {
                             match self.peek() {

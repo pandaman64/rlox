@@ -20,6 +20,7 @@ pub enum OpCode {
     Closure,
     Class,
     Method,
+    Inherit,
     Pop,
     CloseUpvalue,
     Negate,
@@ -42,6 +43,7 @@ pub enum OpCode {
     SetUpvalue,
     GetProperty,
     SetProperty,
+    GetSuper,
     Jump,
     JumpIfFalse,
     Call,
@@ -165,6 +167,7 @@ impl Chunk {
                 // SAFETY: constants in this chunk are valid
                 unsafe { trace_constant_code(self, offset, "OP_METHOD") }
             }
+            Some(Inherit) => trace_simple_code(offset, "OP_INHERIT"),
             Some(Pop) => trace_simple_code(offset, "OP_POP"),
             Some(CloseUpvalue) => trace_simple_code(offset, "OP_CLOSE_UPVALUE"),
             Some(Negate) => trace_simple_code(offset, "OP_NEGATE"),
@@ -201,6 +204,10 @@ impl Chunk {
             Some(SetProperty) => {
                 // SAFETY: constants in this chunk are valid
                 unsafe { trace_constant_code(self, offset, "OP_SET_PROPERTY") }
+            }
+            Some(GetSuper) => {
+                // SAFETY: constants in this chunk are valid
+                unsafe { trace_constant_code(self, offset, "OP_GET_SUPER") }
             }
             Some(Jump) => trace_jump_code(self, offset, "OP_JUMP"),
             Some(JumpIfFalse) => trace_jump_code(self, offset, "OP_JUMP_IF_FALSE"),

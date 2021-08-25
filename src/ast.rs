@@ -316,13 +316,6 @@ impl This {
     pub fn end(&self) -> usize {
         self.inner.text_range().end().into()
     }
-
-    pub fn to_ident(&self) -> Identifier {
-        // technically, this code breaks the invariant
-        Identifier {
-            inner: self.inner.clone(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -424,12 +417,40 @@ impl CallExpr {
 }
 
 #[derive(Debug)]
+pub struct SuperMethodExpr {
+    inner: SyntaxNode,
+}
+
+impl SuperMethodExpr {
+    fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::SuperMethodExprNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
+    pub fn end(&self) -> usize {
+        self.inner.text_range().end().into()
+    }
+
+    pub fn method_name(&self) -> Option<Identifier> {
+        self.inner.children_with_tokens().find_map(try_as_ident)
+    }
+}
+
+#[derive(Debug)]
 pub enum Expr {
     ParenExpr(ParenExpr),
     UnaryOp(UnaryOp),
     BinOp(BinOp),
     Primary(Primary),
     Call(CallExpr),
+    SuperMethod(SuperMethodExpr),
 }
 
 impl Expr {
@@ -443,6 +464,7 @@ impl Expr {
             BinOpNode => Self::BinOp(BinOp::cast(inner)?),
             PrimaryExprNode => Self::Primary(Primary::cast(inner)?),
             CallExprNode => Self::Call(CallExpr::cast(inner)?),
+            SuperMethodExprNode => Self::SuperMethod(SuperMethodExpr::cast(inner)?),
             _ => return None,
         })
     }
@@ -456,6 +478,7 @@ impl Expr {
             BinOp(op) => op.start(),
             Primary(p) => p.start(),
             Call(c) => c.start(),
+            SuperMethod(c) => c.start(),
         }
     }
 
@@ -468,6 +491,7 @@ impl Expr {
             BinOp(op) => op.end(),
             Primary(p) => p.end(),
             Call(c) => c.end(),
+            SuperMethod(c) => c.end(),
         }
     }
 
@@ -607,6 +631,13 @@ impl ClassDecl {
 
     pub fn ident(&self) -> Option<Identifier> {
         self.inner.children_with_tokens().find_map(try_as_ident)
+    }
+
+    pub fn super_class(&self) -> Option<Identifier> {
+        self.inner
+            .children_with_tokens()
+            .filter_map(try_as_ident)
+            .nth(1)
     }
 
     pub fn methods(&self) -> impl Iterator<Item = FunDecl> {

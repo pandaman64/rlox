@@ -147,12 +147,11 @@ pub fn print_codegen_error(error: &CodegenError, root: &SyntaxNode, line_map: &L
                 line, ident
             );
         }
-        UnassignedLocal { ident } => {
-            let line = line_map.resolve(ident.start());
+        UnassignedLocal { ident, position } => {
+            let line = line_map.resolve(*position);
             eprintln!(
                 "[line {}] Error at '{}': Can't read local variable in its own initializer.",
-                line,
-                ident.to_str()
+                line, ident,
             );
         }
         LoopTooLarge { position } => {
@@ -253,6 +252,39 @@ pub fn print_codegen_error(error: &CodegenError, root: &SyntaxNode, line_map: &L
                 None => eprint!("end"),
             }
             eprintln!(": Can't return a value from an initializer.");
+        }
+        InheritFromItself { position } => {
+            let position = *position;
+            let line = line_map.resolve(position);
+            let token = root.token_at_offset(position.try_into().unwrap());
+            eprint!("[line {}] Error at ", line);
+            match token.right_biased() {
+                Some(token) => eprint!("'{}'", token.text()),
+                None => eprint!("end"),
+            }
+            eprintln!(": A class can't inherit from itself.");
+        }
+        SuperOutsideClass { position } => {
+            let position = *position;
+            let line = line_map.resolve(position);
+            let token = root.token_at_offset(position.try_into().unwrap());
+            eprint!("[line {}] Error at ", line);
+            match token.right_biased() {
+                Some(token) => eprint!("'{}'", token.text()),
+                None => eprint!("end"),
+            }
+            eprintln!(": Can't use 'super' outside of a class.");
+        }
+        SuperWithoutSuperClass { position } => {
+            let position = *position;
+            let line = line_map.resolve(position);
+            let token = root.token_at_offset(position.try_into().unwrap());
+            eprint!("[line {}] Error at ", line);
+            match token.right_biased() {
+                Some(token) => eprint!("'{}'", token.text()),
+                None => eprint!("end"),
+            }
+            eprintln!(": Can't use 'super' in a class with no superclass.");
         }
     }
 }

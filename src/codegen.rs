@@ -25,7 +25,7 @@ const UNASSIGNED: usize = usize::MAX;
 #[derive(Debug)]
 pub enum CodegenError {
     ShadowingInSameScope { ident: String, position: usize },
-    UnassignedLocal { ident: Identifier },
+    UnassignedLocal { ident: String, position: usize },
     LoopTooLarge { position: usize },
     ReturnFromTopLevel { position: usize },
     TooManyLocalVariables { position: usize },
@@ -35,6 +35,9 @@ pub enum CodegenError {
     TooManyUpvalues { position: usize },
     ThisOutsideClass { position: usize },
     ReturnFromInit { position: usize },
+    InheritFromItself { position: usize },
+    SuperOutsideClass { position: usize },
+    SuperWithoutSuperClass { position: usize },
 }
 
 struct Local {
@@ -67,8 +70,8 @@ impl FunctionKind {
 }
 
 struct ClassCompiler {
-    #[allow(dead_code)]
     enclosing: Option<Rc<Self>>,
+    has_super_class: Cell<bool>,
 }
 
 pub struct Compiler<'parent, 'map> {
@@ -192,8 +195,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         ))
     }
 
-    fn push_local(&mut self, ident: Identifier) {
-        let name = ident.to_str();
+    fn push_synthetic_local(&mut self, name: &str, position: usize) {
         for local in self.locals.iter().rev() {
             if local.depth != self.block_depth {
                 break;
@@ -204,7 +206,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     .get_mut()
                     .push(CodegenError::ShadowingInSameScope {
                         ident: name.into(),
-                        position: ident.start(),
+                        position,
                     });
                 break;
             }
@@ -219,10 +221,12 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         } else {
             self.errors
                 .get_mut()
-                .push(CodegenError::TooManyLocalVariables {
-                    position: ident.start(),
-                });
+                .push(CodegenError::TooManyLocalVariables { position });
         }
+    }
+
+    fn push_local(&mut self, ident: Identifier) {
+        self.push_synthetic_local(ident.to_str(), ident.start());
     }
 
     fn begin_block(&mut self) {
@@ -244,18 +248,19 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         self.block_depth -= 1;
     }
 
-    fn resolve_local(&self, ident: Identifier) -> Option<usize> {
+    fn resolve_local(&self, ident: &str, position: usize) -> Option<usize> {
         self.locals
             .iter()
             .enumerate()
             .rev()
             .find(|(_, local)| {
-                if local.ident == ident.to_str() {
+                if local.ident == ident {
                     if local.depth == UNASSIGNED {
                         self.errors
                             .borrow_mut()
                             .push(CodegenError::UnassignedLocal {
-                                ident: ident.clone(),
+                                ident: ident.into(),
+                                position,
                             });
                     }
                     true
@@ -289,33 +294,31 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         }
     }
 
-    fn resolve_upvalue(&self, ident: Identifier) -> Option<usize> {
+    fn resolve_upvalue(&self, ident: &str, position: usize) -> Option<usize> {
         let parent = self.parent?;
-        let position = ident.start();
-        match parent.resolve_local(ident.clone()) {
+        match parent.resolve_local(ident, position) {
             Some(local) => {
                 parent.locals[local].captured.set(true);
                 Some(self.add_upvalue(u8::try_from(local).unwrap(), true, position))
             }
             None => {
-                let index = parent.resolve_upvalue(ident)?;
+                let index = parent.resolve_upvalue(ident, position)?;
                 Some(self.add_upvalue(u8::try_from(index).unwrap(), false, position))
             }
         }
     }
 
-    fn resolve(&mut self, vm: &mut Vm<'_>, ident: Identifier) -> (OpCode, OpCode, u8) {
-        if let Some(i) = self.resolve_local(ident.clone()) {
+    fn resolve(&mut self, vm: &mut Vm<'_>, ident: &str, position: usize) -> (OpCode, OpCode, u8) {
+        if let Some(i) = self.resolve_local(ident, position) {
             (OpCode::GetLocal, OpCode::SetLocal, u8::try_from(i).unwrap())
-        } else if let Some(i) = self.resolve_upvalue(ident.clone()) {
+        } else if let Some(i) = self.resolve_upvalue(ident, position) {
             (
                 OpCode::GetUpvalue,
                 OpCode::SetUpvalue,
                 u8::try_from(i).unwrap(),
             )
         } else {
-            let position = ident.start();
-            let ident = vm.allocate_string(ident.to_str().into(), self.mark());
+            let ident = vm.allocate_string(ident.into(), self.mark());
             let index = self.push_constant(Value::Object(ident.into_raw_obj()), position);
 
             (OpCode::GetGlobal, OpCode::SetGlobal, index)
@@ -432,7 +435,8 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                             self.push_opcode(OpCode::SetProperty, expr.start());
                             self.push_u8(index, expr.start());
                         } else {
-                            let (_get_op, set_op, index) = self.resolve(vm, ident);
+                            let (_get_op, set_op, index) =
+                                self.resolve(vm, ident.to_str(), ident.start());
                             self.gen_expr(vm, rhs);
                             self.push_opcode(set_op, expr.start());
                             self.push_u8(index, expr.start());
@@ -516,7 +520,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             Expr::Primary(expr) => match expr {
                 Primary::Identifier(ident) => {
                     let position = ident.start();
-                    let (get_op, _set_op, index) = self.resolve(vm, ident);
+                    let (get_op, _set_op, index) = self.resolve(vm, ident.to_str(), position);
                     self.push_opcode(get_op, position);
                     self.push_u8(index, position);
                 }
@@ -548,7 +552,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         });
                         return;
                     }
-                    let (get_op, _set_op, index) = self.resolve(vm, this.to_ident());
+                    let (get_op, _set_op, index) = self.resolve(vm, "this", this.start());
                     self.push_opcode(get_op, this.start());
                     self.push_u8(index, this.start());
                 }
@@ -599,6 +603,42 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                         self.push_u8(args, expr.start());
                     }
                 }
+            }
+            Expr::SuperMethod(expr) => {
+                match &self.current_class {
+                    None => {
+                        self.errors.get_mut().push(CodegenError::SuperOutsideClass {
+                            position: expr.start(),
+                        });
+                        return;
+                    }
+                    Some(current_class) => {
+                        if !current_class.has_super_class.get() {
+                            self.errors
+                                .get_mut()
+                                .push(CodegenError::SuperWithoutSuperClass {
+                                    position: expr.start(),
+                                });
+                            return;
+                        }
+                    }
+                }
+                {
+                    let (get_op, _set_op, index) = self.resolve(vm, "this", expr.start());
+                    self.push_opcode(get_op, expr.start());
+                    self.push_u8(index, expr.start());
+                }
+                {
+                    let (get_op, _set_op, index) = self.resolve(vm, "super", expr.start());
+                    self.push_opcode(get_op, expr.start());
+                    self.push_u8(index, expr.start());
+                }
+                let method_name = expr.method_name().unwrap();
+                let name = vm.allocate_string(method_name.to_str().into(), self.mark());
+                let index =
+                    self.push_constant(Value::Object(name.into_raw_obj()), method_name.start());
+                self.push_opcode(OpCode::GetSuper, expr.start());
+                self.push_u8(index, expr.start());
             }
         }
     }
@@ -882,9 +922,10 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                 vm.pop();
             }
             Decl::ClassDecl(decl) => {
-                let current_class = Rc::new(ClassCompiler {
-                    enclosing: self.current_class.clone(),
-                });
+                self.current_class = Some(Rc::new(ClassCompiler {
+                    enclosing: self.current_class.take(),
+                    has_super_class: Cell::new(false),
+                }));
 
                 let ident = decl.ident().unwrap();
                 // TODO: if the declaration is global, we have duplicate allocation for the name
@@ -909,7 +950,35 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
 
                 vm.pop();
 
-                let (get_op, _set_op, index) = self.resolve(vm, ident);
+                let (get_op, _set_op, index) = self.resolve(vm, ident.to_str(), ident.start());
+
+                if let Some(super_class) = decl.super_class() {
+                    if ident.to_str() == super_class.to_str() {
+                        self.errors.get_mut().push(CodegenError::InheritFromItself {
+                            position: super_class.start(),
+                        });
+                    }
+
+                    self.begin_block();
+                    self.push_synthetic_local("super", super_class.start());
+                    self.locals.last_mut().unwrap().depth = self.block_depth;
+
+                    let super_position = super_class.start();
+                    let (super_get_op, _super_set_op, super_index) =
+                        self.resolve(vm, super_class.to_str(), super_class.start());
+                    self.push_opcode(super_get_op, super_position);
+                    self.push_u8(super_index, super_position);
+                    self.push_opcode(get_op, super_position);
+                    self.push_u8(index, super_position);
+                    self.push_opcode(OpCode::Inherit, super_position);
+
+                    self.current_class
+                        .as_mut()
+                        .unwrap()
+                        .has_super_class
+                        .set(true);
+                }
+
                 self.push_opcode(get_op, decl.start());
                 self.push_u8(index, decl.start());
                 for method in decl.methods() {
@@ -938,7 +1007,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     // register method_name as GC root
                     vm.push(Value::Object(method_name.into_raw_obj()));
 
-                    Self::gen_closure(method, Some(current_class.clone()), kind)(self, vm);
+                    Self::gen_closure(method, self.current_class.clone(), kind)(self, vm);
                     let index = self
                         .push_constant(Value::Object(method_name.into_raw_obj()), method_position);
                     self.push_opcode(OpCode::Method, method_position);
@@ -947,6 +1016,12 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     vm.pop();
                 }
                 self.push_opcode(OpCode::Pop, decl.return_position());
+
+                if self.current_class.as_ref().unwrap().has_super_class.get() {
+                    self.end_block(decl.start());
+                }
+
+                self.current_class = self.current_class.take().unwrap().enclosing.clone();
             }
             Decl::Stmt(stmt) => self.gen_stmt(vm, stmt),
         }
