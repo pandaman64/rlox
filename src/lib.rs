@@ -129,6 +129,28 @@ pub fn print_syntax_error(error: &SyntaxError, root: &SyntaxNode, line_map: &Lin
             let line = line_map.resolve(*position);
             eprintln!("[line {}] Error: Unexpected character.", line);
         }
+        ExpectSuperClassMethodName { position } => {
+            let position = *position;
+            let line = line_map.resolve(position);
+            let token = root.token_at_offset(position.try_into().unwrap());
+            eprint!("[line {}] Error at ", line);
+            match token.right_biased() {
+                Some(c) => eprint!("'{}'", c.text()),
+                None => eprint!("end"),
+            }
+            eprintln!(": Expect superclass method name.");
+        }
+        ExpectDotAfterSuper { position } => {
+            let position = *position;
+            let line = line_map.resolve(position);
+            let token = root.token_at_offset(position.try_into().unwrap());
+            eprint!("[line {}] Error at ", line);
+            match token.right_biased() {
+                Some(c) => eprint!("'{}'", c.text()),
+                None => eprint!("end"),
+            }
+            eprintln!(": Expect '.' after 'super'.");
+        }
         _error => {
             // TODO: adjust error message
             // eprintln!("{:?}", error);

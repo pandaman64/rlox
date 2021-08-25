@@ -34,6 +34,12 @@ pub enum SyntaxError {
     InvalidAssignment {
         position: usize,
     },
+    ExpectSuperClassMethodName {
+        position: usize,
+    },
+    ExpectDotAfterSuper {
+        position: usize,
+    },
 }
 
 pub struct Parser<'i, I: Iterator<Item = (SyntaxKind, &'i str, Range<usize>)>> {
@@ -210,8 +216,20 @@ where
                     SuperToken => {
                         self.builder.start_node(SuperMethodExprNode.into());
                         self.bump();
-                        self.expect(DotToken);
-                        self.expect(IdentifierToken);
+                        if self.peek() == Some(DotToken) {
+                            self.bump();
+                            if self.peek() == Some(IdentifierToken) {
+                                self.bump();
+                            } else {
+                                self.errors.push(SyntaxError::ExpectSuperClassMethodName {
+                                    position: self.position,
+                                });
+                            }
+                        } else {
+                            self.errors.push(SyntaxError::ExpectDotAfterSuper {
+                                position: self.position,
+                            });
+                        }
                         self.builder.finish_node();
                     }
                     IdentifierToken | StringLiteralToken | NumberToken | NilToken | TrueToken
