@@ -806,13 +806,12 @@ impl<'w> Vm<'w> {
                 unsafe {
                     if let Some(init) = class.as_ref().methods().get(init_str) {
                         // the class has init()
-                        match init {
-                            Value::Object(obj)
-                                if matches!(object::as_ref(obj), ObjectRef::Closure(_)) =>
-                            {
-                                self.push_frame(obj.cast(), args, bp)
+                        match init.as_closure() {
+                            Some(closure) => self.push_frame(closure, args, bp),
+                            None => {
+                                eprintln!("class method is not a closure");
+                                false
                             }
-                            _ => unreachable!(),
                         }
                     } else if args != 0 {
                         // the class does not have init(), but non-zero arguments are supplied
@@ -849,11 +848,9 @@ impl<'w> Vm<'w> {
                     eprintln!("Undefined property '{}'.", method_name.display());
                     false
                 }
-                Some(method) => match method {
-                    Value::Object(obj) if matches!(object::as_ref(obj), ObjectRef::Closure(_)) => {
-                        self.push_frame(obj.cast(), args, bp)
-                    }
-                    _ => {
+                Some(method) => match method.as_closure() {
+                    Some(closure) => self.push_frame(closure, args, bp),
+                    None => {
                         eprintln!("method must be a closure");
                         false
                     }
@@ -869,10 +866,8 @@ impl<'w> Vm<'w> {
         let receiver = self.stack[bp];
         // SAFETY: values in the stack are valid
         unsafe {
-            match receiver {
-                Value::Object(obj) if matches!(object::as_ref(obj), ObjectRef::Instance(_)) => {
-                    let instance: RawInstance = obj.cast();
-
+            match receiver.as_instance() {
+                Some(instance) => {
                     if let Some(method) = instance.as_ref().fields().get(method_name) {
                         self.stack[bp] = method;
                         return self.call(args);
@@ -881,7 +876,7 @@ impl<'w> Vm<'w> {
                     let class = instance.as_ref().class();
                     self.invoke_from_class(class, method_name, args, bp)
                 }
-                _ => {
+                None => {
                     eprintln!("Only instances have methods.");
                     false
                 }
@@ -899,13 +894,10 @@ impl<'w> Vm<'w> {
 
     fn define_method(&mut self, method_name: Key) -> Result<(), InterpretResult> {
         match &self.stack[self.stack.len().saturating_sub(2)..] {
-            [class, method] => match class {
-                // SAFETY: values in the stack are valid
-                Value::Object(obj)
-                    if matches!(unsafe { object::as_ref(*obj) }, ObjectRef::Class(_)) =>
-                {
-                    unsafe {
-                        let mut class: RawClass = obj.cast();
+            // SAFETY: values in the stack are valid
+            [class, method] => unsafe {
+                match class.as_class() {
+                    Some(mut class) => {
                         class.as_mut().methods_mut().insert(
                             &mut self.objects.allocated,
                             method_name,
@@ -915,10 +907,10 @@ impl<'w> Vm<'w> {
                         self.stack.pop();
                         Ok(())
                     }
-                }
-                _ => {
-                    eprintln!("OP_METHOD must take a class");
-                    Err(InterpretResult::CompileError)
+                    None => {
+                        eprintln!("OP_METHOD must take a class");
+                        Err(InterpretResult::CompileError)
+                    }
                 }
             },
             _ => {
@@ -1036,20 +1028,11 @@ impl<'w> Vm<'w> {
                 Some(Closure) => unsafe {
                     use object::Closure;
 
-                    let fun_obj = {
-                        let obj = match extract_constant(&mut frame.ip, chunk) {
-                            Value::Object(obj) => obj,
-                            _ => {
-                                eprintln!("not a function object for OP_CLOSURE");
-                                return InterpretResult::RuntimeError;
-                            }
-                        };
-                        match object::as_ref(obj) {
-                            ObjectRef::Function(_) => obj.cast(),
-                            _ => {
-                                eprintln!("not a function object for OP_CLOSURE");
-                                return InterpretResult::RuntimeError;
-                            }
+                    let fun_obj = match extract_constant(&mut frame.ip, chunk).as_function() {
+                        Some(function) => function,
+                        _ => {
+                            eprintln!("not a function object for OP_CLOSURE");
+                            return InterpretResult::RuntimeError;
                         }
                     };
                     let closure = Closure::new(fun_obj);
@@ -1113,20 +1096,10 @@ impl<'w> Vm<'w> {
                     match &self.stack[self.stack.len().saturating_sub(2)..] {
                         // SAFETY: values in the stack are valid
                         [super_class, subclass] => unsafe {
-                            match super_class {
-                                Value::Object(obj)
-                                    if matches!(object::as_ref(*obj), ObjectRef::Class(_)) =>
-                                {
-                                    let super_class: RawClass = obj.cast();
-                                    let mut subclass: RawClass = match subclass {
-                                        Value::Object(obj)
-                                            if matches!(
-                                                object::as_ref(*obj),
-                                                ObjectRef::Class(_)
-                                            ) =>
-                                        {
-                                            obj.cast()
-                                        }
+                            match super_class.as_class() {
+                                Some(super_class) => {
+                                    let mut subclass = match subclass.as_class() {
+                                        Some(subclass) => subclass,
                                         _ => {
                                             eprintln!("subclass is not a class");
                                             return InterpretResult::CompileError;
@@ -1143,7 +1116,7 @@ impl<'w> Vm<'w> {
                                     // pop subclass
                                     self.stack.pop();
                                 }
-                                _ => {
+                                None => {
                                     eprintln!("Superclass must be a class.");
                                     return InterpretResult::RuntimeError;
                                 }
@@ -1169,9 +1142,7 @@ impl<'w> Vm<'w> {
                             return InterpretResult::RuntimeError;
                         }
                         Some(value) => {
-                            objects
-                                .globals
-                                .insert(&mut objects.allocated, key, *value);
+                            objects.globals.insert(&mut objects.allocated, key, *value);
                         }
                     }
                     // we pop the value after inserting to globals table so that we can run GC
@@ -1291,21 +1262,17 @@ impl<'w> Vm<'w> {
                     };
                     // SAFETY: values in the stack are valid
                     unsafe {
-                        let instance: RawInstance = match self.stack.last() {
-                            Some(value) => match value {
-                                Value::Object(obj)
-                                    if matches!(object::as_ref(*obj), ObjectRef::Instance(_)) =>
-                                {
-                                    obj.cast()
-                                }
-                                _ => {
+                        let instance = match self.stack.last() {
+                            Some(v) => match v.as_instance() {
+                                Some(instance) => instance,
+                                None => {
                                     eprintln!("Only instances have properties.");
                                     return InterpretResult::RuntimeError;
                                 }
                             },
                             None => {
                                 eprintln!("not enough stack for OP_GET_PROPERTY");
-                                return InterpretResult::RuntimeError;
+                                return InterpretResult::CompileError;
                             }
                         };
 
@@ -1317,19 +1284,17 @@ impl<'w> Vm<'w> {
                         } else if let Some(method) =
                             self.bind_method(instance.as_ref().class(), name)
                         {
-                            match method {
-                                Value::Object(obj)
-                                    if matches!(object::as_ref(obj), ObjectRef::Closure(_)) =>
-                                {
+                            match method.as_closure() {
+                                Some(method) => {
                                     let bound_method = self.allocate_bound_method(
                                         Value::Object(instance.cast()),
-                                        obj.cast(),
+                                        method,
                                     );
                                     // pop the instance
                                     self.stack.pop();
                                     self.stack.push(Value::Object(bound_method.cast()));
                                 }
-                                _ => {
+                                None => {
                                     eprintln!("an instance must have closure as method");
                                     return InterpretResult::CompileError;
                                 }
@@ -1357,16 +1322,9 @@ impl<'w> Vm<'w> {
                         [instance, value] => {
                             // SAFETY: values in the stack are valid
                             unsafe {
-                                let mut instance: RawInstance = match instance {
-                                    Value::Object(obj)
-                                        if matches!(
-                                            object::as_ref(*obj),
-                                            ObjectRef::Instance(_)
-                                        ) =>
-                                    {
-                                        obj.cast()
-                                    }
-                                    _ => {
+                                let mut instance = match instance.as_instance() {
+                                    Some(instance) => instance,
+                                    None => {
                                         eprintln!("Only instances have fields.");
                                         return InterpretResult::RuntimeError;
                                     }
@@ -1399,30 +1357,24 @@ impl<'w> Vm<'w> {
                                 }
                             };
 
-                            let super_class: RawClass = match super_class {
-                                Value::Object(obj)
-                                    if matches!(object::as_ref(*obj), ObjectRef::Class(_)) =>
-                                {
-                                    obj.cast()
-                                }
-                                _ => {
+                            let super_class: RawClass = match super_class.as_class() {
+                                Some(super_class) => super_class,
+                                None => {
                                     eprintln!("OP_SET_PROPERTY requires a super class");
                                     return InterpretResult::CompileError;
                                 }
                             };
 
                             if let Some(method) = self.bind_method(super_class, method_name) {
-                                match method {
-                                    Value::Object(obj)
-                                        if matches!(object::as_ref(obj), ObjectRef::Closure(_)) =>
-                                    {
+                                match method.as_closure() {
+                                    Some(closure) => {
                                         let bound_method =
-                                            self.allocate_bound_method(this, obj.cast());
+                                            self.allocate_bound_method(this, closure);
                                         // pop the instance
                                         self.stack.pop();
                                         self.stack.push(Value::Object(bound_method.cast()));
                                     }
-                                    _ => {
+                                    None => {
                                         eprintln!("an instance must have closure as method");
                                         return InterpretResult::CompileError;
                                     }
@@ -1497,44 +1449,36 @@ impl<'w> Vm<'w> {
                         return InterpretResult::CompileError;
                     }
                 },
-                Some(Add) => {
-                    let len = self.stack.len();
-                    if len < 2 {
+                Some(Add) => match &self.stack[self.stack.len().saturating_sub(2)..] {
+                    [Number(_), Number(_)] => {
+                        binop!(self, +, Number);
+                    }
+                    [v1, v2] => unsafe {
+                        match (v1.as_str(), v2.as_str()) {
+                            (Some(s1), Some(s2)) => {
+                                let result = s1.as_ref().as_rust_str().to_string()
+                                    + s2.as_ref().as_rust_str();
+                                let obj = objects.allocate_string(
+                                    result,
+                                    &self.stack,
+                                    &self.frames,
+                                    mark_nothing,
+                                );
+                                self.stack.pop();
+                                self.stack.pop();
+                                self.stack.push(Value::Object(obj.into_raw_obj()));
+                            }
+                            _ => {
+                                eprintln!("Operands must be two numbers or two strings.");
+                                return InterpretResult::RuntimeError;
+                            }
+                        }
+                    },
+                    _ => {
                         eprintln!("insufficient stack");
                         return InterpretResult::CompileError;
                     }
-                    match &self.stack[len - 2..] {
-                        [Object(o1), Object(o2)] => {
-                            // SAFETY: these objects are valid
-                            match unsafe { (object::as_ref(*o1), object::as_ref(*o2)) } {
-                                (ObjectRef::Str(o1), ObjectRef::Str(o2)) => {
-                                    let result = o1.as_rust_str().to_string() + o2.as_rust_str();
-                                    let obj = objects.allocate_string(
-                                        result,
-                                        &self.stack,
-                                        &self.frames,
-                                        mark_nothing,
-                                    );
-                                    self.stack.pop();
-                                    self.stack.pop();
-                                    self.stack.push(Value::Object(obj.into_raw_obj()));
-                                }
-                                _ => {
-                                    eprintln!("Operands must be two numbers or two strings.");
-                                    return InterpretResult::RuntimeError;
-                                }
-                            }
-                        }
-                        [Number(_), Number(_)] => {
-                            binop!(self, +, Number);
-                        }
-                        [_v2, _v1] => {
-                            eprintln!("Operands must be two numbers or two strings.");
-                            return InterpretResult::RuntimeError;
-                        }
-                        _ => unreachable!(),
-                    }
-                }
+                },
                 Some(Subtract) => binop!(self, -, Number),
                 Some(Multiply) => binop!(self, *, Number),
                 Some(Divide) => binop!(self, /, Number),
@@ -1598,26 +1542,14 @@ impl<'w> Vm<'w> {
                     let args = function.chunk().code()[frame.ip];
                     frame.ip += 1;
 
-                    let super_class = match self.stack.last() {
+                    // SAFETY: values in the stack are valid
+                    let super_class = match self.stack.last().and_then(|v| unsafe { v.as_class() })
+                    {
                         None => {
-                            eprintln!("no stack for OP_SUPER_INVOKE");
+                            eprintln!("OP_SUPER_INVOKE takes a super class");
                             return InterpretResult::CompileError;
                         }
-                        Some(v) => match v {
-                            // SAFETY: values in the stack are valid
-                            Value::Object(obj)
-                                if matches!(
-                                    unsafe { object::as_ref(*obj) },
-                                    ObjectRef::Class(_)
-                                ) =>
-                            {
-                                obj.cast()
-                            }
-                            _ => {
-                                eprintln!("OP_SUPER_INVOKE takes a super class");
-                                return InterpretResult::CompileError;
-                            }
-                        },
+                        Some(v) => v,
                     };
                     self.stack.pop();
                     let bp = self.stack.len() - usize::from(args) - 1;

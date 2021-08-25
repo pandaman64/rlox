@@ -3,12 +3,7 @@ use num_derive::{FromPrimitive, ToPrimitive};
 
 use std::{convert::TryFrom, fmt, num::TryFromIntError};
 
-use crate::{
-    trace_available,
-    value::Value,
-    vm::object::{self, ObjectRef},
-    HeapSize,
-};
+use crate::{trace_available, value::Value, HeapSize};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromPrimitive, ToPrimitive)]
@@ -145,26 +140,19 @@ impl Chunk {
 
                 // SAFETY: constants and generated code are valid
                 unsafe {
-                    match constant {
-                        Value::Object(obj) => match object::as_ref(*obj) {
-                            ObjectRef::Function(function) => {
-                                for _ in 0..function.upvalues() {
-                                    let is_local = if self.code[offset] > 0 {
-                                        "local"
-                                    } else {
-                                        "upvalue"
-                                    };
-                                    let index = self.code[offset + 1];
-                                    eprintln!(
-                                        "{:04}    |                     {} {}",
-                                        offset, index, is_local,
-                                    );
-                                    offset += 2;
-                                }
-                            }
-                            _ => unreachable!(),
-                        },
-                        _ => unreachable!(),
+                    let function = constant.as_function().unwrap();
+                    for _ in 0..function.as_ref().upvalues() {
+                        let is_local = if self.code[offset] > 0 {
+                            "local"
+                        } else {
+                            "upvalue"
+                        };
+                        let index = self.code[offset + 1];
+                        eprintln!(
+                            "{:04}    |                     {} {}",
+                            offset, index, is_local,
+                        );
+                        offset += 2;
                     }
                 }
                 offset

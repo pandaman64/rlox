@@ -19,6 +19,7 @@ pub type RawClass = NonNull<Class>;
 pub type RawInstance = NonNull<Instance>;
 pub type RawBoundMethod = NonNull<BoundMethod>;
 
+#[derive(PartialEq, Eq)]
 #[repr(u8)]
 pub enum ObjectKind {
     Str,

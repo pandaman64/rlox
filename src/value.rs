@@ -1,6 +1,8 @@
 use core::fmt;
 
-use crate::vm::object::{self, ObjectRef, RawObject};
+use crate::vm::object::{
+    self, ObjectKind, ObjectRef, RawClass, RawClosure, RawFunction, RawInstance, RawObject, RawStr,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
@@ -110,6 +112,61 @@ impl Value {
             // SAFETY: the object is valid
             unsafe {
                 object::mark(*obj, worklist);
+            }
+        }
+    }
+
+    /// # Safety
+    /// this object must be valid
+    pub unsafe fn as_str(&self) -> Option<RawStr> {
+        unsafe {
+            match self {
+                Self::Object(obj) if obj.as_ref().kind == ObjectKind::Str => Some(obj.cast()),
+                _ => None,
+            }
+        }
+    }
+
+    /// # Safety
+    /// this object must be valid
+    pub unsafe fn as_function(&self) -> Option<RawFunction> {
+        unsafe {
+            match self {
+                Self::Object(obj) if obj.as_ref().kind == ObjectKind::Function => Some(obj.cast()),
+                _ => None,
+            }
+        }
+    }
+
+    /// # Safety
+    /// this object must be valid
+    pub unsafe fn as_closure(&self) -> Option<RawClosure> {
+        unsafe {
+            match self {
+                Self::Object(obj) if obj.as_ref().kind == ObjectKind::Closure => Some(obj.cast()),
+                _ => None,
+            }
+        }
+    }
+
+    /// # Safety
+    /// this object must be valid
+    pub unsafe fn as_class(&self) -> Option<RawClass> {
+        unsafe {
+            match self {
+                Self::Object(obj) if obj.as_ref().kind == ObjectKind::Class => Some(obj.cast()),
+                _ => None,
+            }
+        }
+    }
+
+    /// # Safety
+    /// this object must be valid
+    pub unsafe fn as_instance(&self) -> Option<RawInstance> {
+        unsafe {
+            match self {
+                Self::Object(obj) if obj.as_ref().kind == ObjectKind::Instance => Some(obj.cast()),
+                _ => None,
             }
         }
     }
