@@ -166,8 +166,11 @@ where
             _ => {}
         }
         loop {
+            let position = self.position;
             f(self);
-            if self.peek() == Some(close) {
+            // if the next token terminates the syntax element or f does not consume any token, return
+            let next = self.peek();
+            if next == None || next == Some(close) || position == self.position {
                 break;
             }
             self.expect(SyntaxKind::CommaToken);
