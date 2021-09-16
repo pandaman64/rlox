@@ -29,6 +29,7 @@ pub enum CodegenError {
     UnassignedLocal { ident: String, position: usize },
     LoopTooLarge { position: usize },
     ReturnFromTopLevel { position: usize },
+    DeferFromGlobal { position: usize },
     TooManyLocalVariables { position: usize },
     TooManyConstants { position: usize },
     TooManyParameters { position: usize },
@@ -44,6 +45,7 @@ pub enum CodegenError {
 struct Local {
     ident: String,
     depth: usize,
+    defer: bool,
     captured: Cell<bool>,
 }
 
@@ -98,6 +100,7 @@ fn new_locals(kind: &FunctionKind) -> Vec<Local> {
     vec![Local {
         ident,
         depth: 0,
+        defer: false,
         captured: Cell::new(false),
     }]
 }
@@ -203,20 +206,23 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
         ))
     }
 
-    fn push_synthetic_local(&mut self, name: &str, position: usize) {
-        for local in self.locals.iter().rev() {
-            if local.depth != self.block_depth {
-                break;
-            }
+    fn push_synthetic_local(&mut self, name: &str, position: usize, defer: bool) {
+        // variables for defer statements does not clash with other variables
+        if !defer {
+            for local in self.locals.iter().rev() {
+                if local.depth != self.block_depth {
+                    break;
+                }
 
-            if local.ident == name {
-                self.errors
-                    .get_mut()
-                    .push(CodegenError::ShadowingInSameScope {
-                        ident: name.into(),
-                        position,
-                    });
-                break;
+                if local.ident == name {
+                    self.errors
+                        .get_mut()
+                        .push(CodegenError::ShadowingInSameScope {
+                            ident: name.into(),
+                            position,
+                        });
+                    break;
+                }
             }
         }
 
@@ -224,6 +230,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             self.locals.push(Local {
                 ident: name.into(),
                 depth: UNASSIGNED,
+                defer,
                 captured: Cell::new(false),
             });
         } else {
@@ -234,7 +241,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
     }
 
     fn push_local(&mut self, ident: Identifier) {
-        self.push_synthetic_local(ident.to_str(), ident.start());
+        self.push_synthetic_local(ident.to_str(), ident.start(), false);
     }
 
     fn begin_block(&mut self) {
@@ -246,7 +253,10 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
             if local.depth != self.block_depth {
                 break;
             }
-            if !local.captured.get() {
+            if local.defer {
+                self.push_opcode(OpCode::Call, position);
+                self.push_u8(0, position);
+            } else if !local.captured.get() {
                 self.push_opcode(OpCode::Pop, position);
             } else {
                 self.push_opcode(OpCode::CloseUpvalue, position);
@@ -733,6 +743,43 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     self.push_opcode(OpCode::Return, stmt.start());
                 }
             },
+            Stmt::DeferStmt(stmt) => {
+                if self.block_depth == GLOBAL_BLOCK {
+                    self.errors.get_mut().push(CodegenError::DeferFromGlobal {
+                        position: stmt.start(),
+                    });
+                    return;
+                }
+                self.push_synthetic_local("", stmt.start(), true);
+                self.locals.last_mut().unwrap().depth = self.block_depth;
+
+                // generate closure value
+                let name = vm.allocate_string("".into(), self.mark());
+                vm.push(Value::Object(name.into_raw_obj()));
+                {
+                    let mut compiler = Compiler::new_function(
+                        self,
+                        self.current_class.clone(),
+                        FunctionKind::Function { name, arity: 0 },
+                        self.line_map,
+                        stmt.return_position(),
+                    );
+                    compiler.gen_block_stmt(vm, stmt.block().unwrap(), true);
+                    let (fun_obj, upvalues, errors) = compiler.finish(vm).unwrap();
+                    self.errors.get_mut().extend(errors);
+
+                    let index = self.push_constant(Value::Object(fun_obj.cast()), stmt.start());
+                    self.push_opcode(OpCode::Closure, stmt.start());
+                    self.push_u8(index, stmt.start());
+
+                    for upvalue in upvalues.iter() {
+                        let is_local = if upvalue.is_local { 1 } else { 0 };
+                        self.push_u8(is_local, stmt.start());
+                        self.push_u8(upvalue.index, stmt.start());
+                    }
+                }
+                vm.pop();
+            }
             Stmt::BlockStmt(stmt) => self.gen_block_stmt(vm, stmt, true),
             Stmt::IfStmt(stmt) => {
                 let stmt_end = stmt.end();
@@ -1000,7 +1047,7 @@ impl<'parent, 'map> Compiler<'parent, 'map> {
                     }
 
                     self.begin_block();
-                    self.push_synthetic_local("super", super_class.start());
+                    self.push_synthetic_local("super", super_class.start(), false);
                     self.locals.last_mut().unwrap().depth = self.block_depth;
 
                     let super_position = super_class.start();

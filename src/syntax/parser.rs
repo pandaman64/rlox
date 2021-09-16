@@ -334,6 +334,12 @@ where
                         }
                         self.builder.finish_node();
                     }
+                    DeferToken => {
+                        self.builder.start_node(DeferStmtNode.into());
+                        self.bump();
+                        self.parse_block_stmt();
+                        self.builder.finish_node();
+                    }
                     BraceOpenToken => self.parse_block_stmt(),
                     IfToken => {
                         self.builder.start_node(IfStmtNode.into());

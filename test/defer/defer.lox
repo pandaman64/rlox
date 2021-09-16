@@ -1,0 +1,7 @@
+{
+    var i = 100;
+    defer {
+        print i; // expect: 300
+    }
+    i = 300;
+}

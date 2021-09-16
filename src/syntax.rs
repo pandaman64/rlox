@@ -87,6 +87,8 @@ pub enum SyntaxKind {
     OrToken,
     #[token("print")]
     PrintToken,
+    #[token("defer")]
+    DeferToken,
     #[token("return")]
     ReturnToken,
     #[token("super")]
@@ -127,6 +129,7 @@ pub enum SyntaxKind {
     IfStmtNode,
     PrintStmtNode,
     ReturnStmtNode,
+    DeferStmtNode,
     WhileStmtNode,
     BlockStmtNode,
     StmtNode,
@@ -167,6 +170,7 @@ impl SyntaxKind {
             OrToken => Some("or"),
             PrintToken => Some("print"),
             ReturnToken => Some("return"),
+            DeferToken => Some("defer"),
             SuperToken => Some("super"),
             ThisToken => Some("this"),
             TrueToken => Some("true"),

@@ -715,6 +715,43 @@ impl ReturnStmt {
 }
 
 #[derive(Debug)]
+pub struct DeferStmt {
+    inner: SyntaxNode,
+}
+
+impl DeferStmt {
+    pub fn cast(inner: SyntaxNode) -> Option<Self> {
+        if inner.kind() == SyntaxKind::DeferStmtNode {
+            Some(Self { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn start(&self) -> usize {
+        self.inner.text_range().start().into()
+    }
+
+    pub fn return_position(&self) -> usize {
+        // the position of `}` if exists.
+        // return the end of the node if not exist.
+        self.inner
+            .children_with_tokens()
+            .find_map(|child| match child {
+                NodeOrToken::Token(token) if token.kind() == SyntaxKind::BraceCloseToken => {
+                    Some(token.text_range().start().into())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| self.inner.text_range().end().into())
+    }
+
+    pub fn block(&self) -> Option<BlockStmt> {
+        self.inner.children().find_map(BlockStmt::cast)
+    }
+}
+
+#[derive(Debug)]
 pub struct BlockStmt {
     inner: SyntaxNode,
 }
@@ -907,6 +944,7 @@ pub enum Stmt {
     ExprStmt(ExprStmt),
     PrintStmt(PrintStmt),
     ReturnStmt(ReturnStmt),
+    DeferStmt(DeferStmt),
     BlockStmt(BlockStmt),
     IfStmt(IfStmt),
     WhileStmt(WhileStmt),
@@ -923,6 +961,7 @@ impl Stmt {
                 ExprStmtNode => Self::ExprStmt(ExprStmt::cast(child)?),
                 PrintStmtNode => Self::PrintStmt(PrintStmt::cast(child)?),
                 ReturnStmtNode => Self::ReturnStmt(ReturnStmt::cast(child)?),
+                DeferStmtNode => Self::DeferStmt(DeferStmt::cast(child)?),
                 BlockStmtNode => Self::BlockStmt(BlockStmt::cast(child)?),
                 IfStmtNode => Self::IfStmt(IfStmt::cast(child)?),
                 WhileStmtNode => Self::WhileStmt(WhileStmt::cast(child)?),
@@ -941,6 +980,7 @@ impl Stmt {
             ExprStmt(stmt) => stmt.start(),
             PrintStmt(stmt) => stmt.start(),
             ReturnStmt(stmt) => stmt.start(),
+            DeferStmt(stmt) => stmt.start(),
             BlockStmt(stmt) => stmt.start(),
             IfStmt(stmt) => stmt.start(),
             WhileStmt(stmt) => stmt.start(),
@@ -955,6 +995,7 @@ impl Stmt {
             ExprStmt(stmt) => stmt.inner.text_range().end().into(),
             PrintStmt(stmt) => stmt.inner.text_range().end().into(),
             ReturnStmt(stmt) => stmt.inner.text_range().end().into(),
+            DeferStmt(stmt) => stmt.inner.text_range().end().into(),
             BlockStmt(stmt) => stmt.inner.text_range().end().into(),
             IfStmt(stmt) => stmt.inner.text_range().end().into(),
             WhileStmt(stmt) => stmt.inner.text_range().end().into(),

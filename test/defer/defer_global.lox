@@ -1,0 +1,2 @@
+// [line 2] Error at 'defer': Can't defer in global scope.
+defer {}
